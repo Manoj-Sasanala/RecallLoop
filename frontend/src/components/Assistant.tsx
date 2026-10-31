@@ -17,12 +17,21 @@ declare global {
 
 type SpeechRecognitionInstance = {
   lang: string;
+  continuous: boolean;
   interimResults: boolean;
-  onresult: ((event: { results: { transcript: string }[][] }) => void) | null;
+  onresult:
+    | ((
+        event: {
+          resultIndex: number;
+          results: { isFinal: boolean; 0: { transcript: string } }[];
+        },
+      ) => void)
+    | null;
   onerror: (() => void) | null;
   onend: (() => void) | null;
   start: () => void;
   stop: () => void;
+  abort: () => void;
 };
 
 function answer(query: string, ctx: AssistantContext): string {
@@ -49,17 +58,6 @@ function answer(query: string, ctx: AssistantContext): string {
   return "I can report progress, weak topics, revision plans, and the exam countdown. Try: what is my progress?";
 }
 
-function speak(text: string) {
-  try {
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = 1.05;
-    window.speechSynthesis.speak(utterance);
-  } catch {
-    /* audio unavailable: text reply still shows */
-  }
-}
-
 // Jarvis-style panel: typed or spoken questions, deterministic answers from
 // live session data. No model calls, no network, works offline.
 export function Assistant({ context }: { context: AssistantContext }) {
@@ -70,11 +68,57 @@ export function Assistant({ context }: { context: AssistantContext }) {
     { who: "jarvis", text: "Systems online. Ask for progress, weak topics, revision, or countdown." },
   ]);
   const recogRef = useRef<SpeechRecognitionInstance | null>(null);
+  const convoRef = useRef(false);
+  const speakingRef = useRef(false);
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: "nearest" });
   }, [log, open]);
+
+  useEffect(
+    () => () => {
+      convoRef.current = false;
+      try {
+        recogRef.current?.abort();
+      } catch {
+        /* already stopped */
+      }
+      try {
+        window.speechSynthesis.cancel();
+      } catch {
+        /* audio unavailable */
+      }
+    },
+    [],
+  );
+
+  const speak = (text: string) => {
+    try {
+      speakingRef.current = true;
+      try {
+        recogRef.current?.abort();
+      } catch {
+        /* mic already stopped */
+      }
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.rate = 1.05;
+      utterance.onend = utterance.onerror = () => {
+        speakingRef.current = false;
+        if (convoRef.current && recogRef.current) {
+          try {
+            recogRef.current.start();
+          } catch {
+            /* already running or stopped: onend handler recovers */
+          }
+        }
+      };
+      window.speechSynthesis.speak(utterance);
+    } catch {
+      speakingRef.current = false;
+    }
+  };
 
   const ask = (text: string) => {
     const query = text.trim();
@@ -85,33 +129,69 @@ export function Assistant({ context }: { context: AssistantContext }) {
     speak(reply);
   };
 
+  const startRecog = (): boolean => {
+    const Ctor = window.SpeechRecognition ?? window.webkitSpeechRecognition;
+    if (!Ctor) return false;
+    const recog = new Ctor();
+    recogRef.current = recog;
+    recog.lang = "en-US";
+    recog.continuous = true;
+    recog.interimResults = true;
+    recog.onresult = (event) => {
+      let finalText = "";
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        if (event.results[i].isFinal) finalText += event.results[i][0].transcript;
+      }
+      if (finalText.trim()) ask(finalText);
+    };
+    recog.onerror = () => {
+      if (!convoRef.current) setListening(false);
+    };
+    recog.onend = () => {
+      if (convoRef.current && !speakingRef.current) {
+        try {
+          recog.start();
+          return;
+        } catch {
+          /* fall through to stopped state */
+        }
+      }
+      setListening(false);
+    };
+    try {
+      recog.start();
+      setListening(true);
+      return true;
+    } catch {
+      setListening(false);
+      return false;
+    }
+  };
+
   const toggleListen = () => {
+    if (convoRef.current) {
+      convoRef.current = false;
+      speakingRef.current = false;
+      try {
+        window.speechSynthesis.cancel();
+      } catch {
+        /* audio unavailable */
+      }
+      try {
+        recogRef.current?.abort();
+      } catch {
+        /* already stopped */
+      }
+      setListening(false);
+      return;
+    }
     const Ctor = window.SpeechRecognition ?? window.webkitSpeechRecognition;
     if (!Ctor) {
       setLog((cur) => [...cur, { who: "jarvis", text: "Voice input is not supported in this browser. Type instead." }]);
       return;
     }
-    if (listening) {
-      recogRef.current?.stop();
-      return;
-    }
-    const recog = new Ctor();
-    recogRef.current = recog;
-    recog.lang = "en-US";
-    recog.interimResults = false;
-    recog.onresult = (event) => {
-      const transcript = event.results[0][0].transcript;
-      setListening(false);
-      ask(transcript);
-    };
-    recog.onerror = () => setListening(false);
-    recog.onend = () => setListening(false);
-    try {
-      recog.start();
-      setListening(true);
-    } catch {
-      setListening(false);
-    }
+    convoRef.current = true;
+    startRecog();
   };
 
   return (
