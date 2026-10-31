@@ -22,6 +22,7 @@ from app.models import (
     Question,
     QuestionAttempt,
     RelationshipType,
+    SessionNote,
     SourceDocument,
     StudySession,
     Topic,
@@ -369,6 +370,128 @@ def weak_topic_ids(db: Session, attempt: ExamAttempt) -> list[UUID]:
     )
     ranked = sorted(rows, key=lambda r: r.vulnerability_score, reverse=True)
     return [row.topic_id for row in ranked]
+
+
+def list_sessions(db: Session) -> list[dict]:
+    sessions = list(db.exec(select(StudySession).order_by(StudySession.created_at.desc())))  # type: ignore[arg-type]
+    out = []
+    for session in sessions:
+        attempts = list(
+            db.exec(
+                select(ExamAttempt)
+                .where(
+                    ExamAttempt.session_id == session.id,
+                    ExamAttempt.submitted_at.is_not(None),
+                )
+                .order_by(ExamAttempt.round_number)
+            )
+        )
+        weak_total = 0
+        last_mastery = None
+        for attempt in attempts:
+            snaps = list(
+                db.exec(
+                    select(TopicMasterySnapshot).where(
+                        TopicMasterySnapshot.exam_attempt_id == attempt.id
+                    )
+                )
+            )
+            weak_total += sum(1 for s in snaps if s.is_flagged_weak)
+            if snaps:
+                last_mastery = sum(s.mastery_score for s in snaps) / len(snaps)
+        out.append(
+            {
+                "session_id": str(session.id),
+                "title": session.title,
+                "course_code": session.course_code,
+                "status": session.status,
+                "demo_bundle_id": session.demo_bundle_id,
+                "created_at": session.created_at.isoformat(),
+                "rounds": len(attempts),
+                "weak_topics": weak_total,
+                "last_mastery": round(last_mastery, 4) if last_mastery is not None else None,
+            }
+        )
+    return out
+
+
+def get_notes(db: Session, session: StudySession) -> dict:
+    note = db.get(SessionNote, session.id)
+    return {
+        "session_id": str(session.id),
+        "notes_md": note.notes_md if note else "",
+        "updated_at": note.updated_at.isoformat() if note else None,
+    }
+
+
+def save_notes(db: Session, session: StudySession, notes_md: str) -> dict:
+    note = db.get(SessionNote, session.id)
+    if note is None:
+        note = SessionNote(session_id=session.id, notes_md=notes_md)
+    else:
+        note.notes_md = notes_md
+        note.updated_at = utcnow()
+    db.add(note)
+    db.commit()
+    db.refresh(note)
+    return {
+        "session_id": str(session.id),
+        "notes_md": note.notes_md,
+        "updated_at": note.updated_at.isoformat(),
+    }
+
+
+def revision_plan(db: Session, session: StudySession) -> dict:
+    """Deterministic next-review dates from the latest graded round.
+
+    Rule (documented, no model): any LURE_ENTRAPMENT or weak topic reviews
+    tomorrow; fragile-only topics in 3 days; all-mastered in 7 days.
+    """
+    from datetime import timedelta
+
+    attempts = list(
+        db.exec(
+            select(ExamAttempt)
+            .where(
+                ExamAttempt.session_id == session.id,
+                ExamAttempt.submitted_at.is_not(None),
+            )
+            .order_by(ExamAttempt.round_number)
+        )
+    )
+    if not attempts:
+        return {"session_id": str(session.id), "items": [], "reason": "no graded rounds yet"}
+    latest = attempts[-1]
+    snaps = list(
+        db.exec(
+            select(TopicMasterySnapshot).where(
+                TopicMasterySnapshot.exam_attempt_id == latest.id
+            )
+        )
+    )
+    base = utcnow().date()
+    items = []
+    for snap in snaps:
+        topic = db.get(Topic, snap.topic_id)
+        if snap.is_flagged_weak:
+            days, reason = 1, "weak topic: lure or mastery below threshold"
+        elif snap.mastery_score < 1.0:
+            days, reason = 3, "fragile: correct but not confident"
+        else:
+            days, reason = 7, "mastered: spaced reinforcement"
+        items.append(
+            {
+                "topic_id": str(snap.topic_id),
+                "title": topic.title if topic else "?",
+                "mastery_score": snap.mastery_score,
+                "is_flagged_weak": snap.is_flagged_weak,
+                "review_on": (base + timedelta(days=days)).isoformat(),
+                "in_days": days,
+                "reason": reason,
+            }
+        )
+    items.sort(key=lambda i: i["review_on"])
+    return {"session_id": str(session.id), "items": items}
 
 
 def remediation_cards(db: Session, attempt: ExamAttempt, topic_ids: list[UUID]) -> list[dict]:

@@ -3,9 +3,12 @@ import type {
   Delta,
   Exam,
   GradeResult,
+  NotesPayload,
   PagePayload,
   RemediationPlan,
+  RevisionItem,
   Session,
+  SessionSummary,
   Topic,
 } from "./types";
 
@@ -98,6 +101,26 @@ export function remediate(examId: string): Promise<RemediationPlan> {
 
 export function getDelta(sessionId: string): Promise<Delta> {
   return request(`/api/v1/sessions/${sessionId}/progress-delta`);
+}
+
+export function listSessions(): Promise<{ sessions: SessionSummary[] }> {
+  return request("/api/v1/sessions");
+}
+
+export function getNotes(sessionId: string): Promise<NotesPayload> {
+  return request(`/api/v1/sessions/${sessionId}/notes`);
+}
+
+export function saveNotes(sessionId: string, notesMd: string): Promise<NotesPayload> {
+  return request(`/api/v1/sessions/${sessionId}/notes`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ notes_md: notesMd }),
+  });
+}
+
+export function getRevision(sessionId: string): Promise<{ session_id: string; items: RevisionItem[] }> {
+  return request(`/api/v1/sessions/${sessionId}/revision`);
 }
 
 export function getPage(docId: string, pageNumber: number, quote?: string): Promise<PagePayload> {

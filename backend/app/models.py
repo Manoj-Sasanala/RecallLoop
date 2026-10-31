@@ -64,6 +64,14 @@ class StudySession(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utcnow, index=True)
 
 
+class SessionNote(SQLModel, table=True):
+    __tablename__ = "session_note"
+
+    session_id: UUID = Field(foreign_key="study_session.id", ondelete="CASCADE", primary_key=True)
+    notes_md: str = ""
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
 class SourceDocument(SQLModel, table=True):
     __tablename__ = "source_document"
 

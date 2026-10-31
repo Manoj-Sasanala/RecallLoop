@@ -53,6 +53,10 @@ class RemediateRequest(BaseModel):
     retest_question_count: int = 5
 
 
+class NotesRequest(BaseModel):
+    notes_md: str = ""
+
+
 def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
@@ -111,9 +115,25 @@ def create_app(engine=None, client=None) -> FastAPI:
     def create_session(body: SessionCreate, db: DBSession = Depends(db_dep)):
         return _session_out(service.create_session(db, body.title, body.demo_bundle_id))
 
+    @app.get("/api/v1/sessions")
+    def list_all_sessions(db: DBSession = Depends(db_dep)):
+        return {"sessions": service.list_sessions(db)}
+
     @app.get("/api/v1/sessions/{session_id}")
     def read_session(session_id: UUID, db: DBSession = Depends(db_dep)):
         return _session_out(service.get_session(db, session_id))
+
+    @app.get("/api/v1/sessions/{session_id}/notes")
+    def read_notes(session_id: UUID, db: DBSession = Depends(db_dep)):
+        return service.get_notes(db, service.get_session(db, session_id))
+
+    @app.put("/api/v1/sessions/{session_id}/notes")
+    def write_notes(session_id: UUID, body: NotesRequest, db: DBSession = Depends(db_dep)):
+        return service.save_notes(db, service.get_session(db, session_id), body.notes_md)
+
+    @app.get("/api/v1/sessions/{session_id}/revision")
+    def revision(session_id: UUID, db: DBSession = Depends(db_dep)):
+        return service.revision_plan(db, service.get_session(db, session_id))
 
     @app.post("/api/v1/sessions/{session_id}/documents", status_code=201)
     async def upload_documents(

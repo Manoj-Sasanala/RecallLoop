@@ -12,6 +12,8 @@ import {
 import { Blueprint } from "./components/Blueprint";
 import { DeltaView } from "./components/DeltaView";
 import { Exam } from "./components/Exam";
+import { Home } from "./components/Home";
+import { NotesView } from "./components/NotesView";
 import { QuoteDrawer } from "./components/QuoteDrawer";
 import { Remediation } from "./components/Remediation";
 import { Results } from "./components/Results";
@@ -24,13 +26,15 @@ import type {
   GradeResult,
   RemediationPlan,
   Session,
+  SessionSummary,
   Stage,
   Topic,
 } from "./types";
 
-type View = Stage | "retest";
+type View = Stage | "retest" | "notes";
 
 const STEP_BY_VIEW: Record<View, number> = {
+  home: 0,
   setup: 0,
   blueprint: 0,
   exam: 1,
@@ -38,6 +42,7 @@ const STEP_BY_VIEW: Record<View, number> = {
   remediation: 2,
   retest: 3,
   delta: 3,
+  notes: 0,
 };
 
 const PROGRESS: Record<string, string> = {
@@ -47,7 +52,9 @@ const PROGRESS: Record<string, string> = {
 };
 
 export default function App() {
-  const [view, setView] = useState<View>("setup");
+  const [view, setView] = useState<View>("home");
+  const [homeToken, setHomeToken] = useState(0);
+  const [notesTarget, setNotesTarget] = useState<SessionSummary | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [topics, setTopics] = useState<Topic[]>([]);
   const [exam, setExam] = useState<ExamData | null>(null);
@@ -71,7 +78,8 @@ export default function App() {
   };
 
   const reset = () => {
-    setView("setup");
+    setView("home");
+    setHomeToken((t) => t + 1);
     setSession(null);
     setTopics([]);
     setExam(null);
@@ -80,13 +88,30 @@ export default function App() {
     setDelta(null);
     setError(null);
     setQuoted(null);
+    setNotesTarget(null);
   };
 
-  const purge = () =>
+  const openSession = (summary: SessionSummary) =>
+    run("Opening session...", async () => {
+      const res = await fetch(`/api/v1/sessions/${summary.session_id}`);
+      if (!res.ok) throw new Error("session not found");
+      const full = (await res.json()) as Session;
+      setSession(full);
+      setBusy("Loading topics...");
+      const extracted = await extractBlueprint(full.session_id);
+      setTopics(extracted);
+      setView("blueprint");
+    });
+
+  const purgeSummary = (summary: SessionSummary) =>
     run("Deleting session data...", async () => {
-      if (!session) return;
-      await deleteSession(session.session_id);
-      reset();
+      if (!window.confirm(`Delete "${summary.title}" and all its data?`)) return;
+      await deleteSession(summary.session_id);
+      if (session?.session_id === summary.session_id) {
+        reset();
+        return;
+      }
+      setHomeToken((t) => t + 1);
     });
 
   const startDemo = (bundleId: string) =>
@@ -160,7 +185,25 @@ export default function App() {
   const docId = topics[0]?.page_refs[0]?.doc_id ?? "";
 
   return (
-    <Shell activeStep={STEP_BY_VIEW[view]} session={session} onPurge={session ? purge : undefined}>
+    <Shell
+      activeStep={STEP_BY_VIEW[view]}
+      session={session}
+      onPurge={
+        session
+          ? () =>
+              run("Deleting session data...", async () => {
+                if (!window.confirm(`Delete "${session.title}" and all its data?`)) return;
+                await deleteSession(session.session_id);
+                reset();
+              })
+          : undefined
+      }
+      onHome={() => {
+        setSession(null);
+        setView("home");
+        setHomeToken((t) => t + 1);
+      }}
+    >
       {error && (
         <div className="error" role="alert" style={{ marginBottom: 16 }}>
           {error}
@@ -173,12 +216,36 @@ export default function App() {
         </div>
       )}
 
+      {view === "home" && (
+        <Home
+          refreshToken={homeToken}
+          onNew={() => setView("setup")}
+          onOpen={openSession}
+          onNotes={(s) => {
+            setNotesTarget(s);
+            setView("notes");
+          }}
+          onPurge={purgeSummary}
+        />
+      )}
+
+      {view === "notes" && notesTarget && (
+        <NotesView
+          sessionId={notesTarget.session_id}
+          title={notesTarget.title}
+          onBack={() => {
+            setNotesTarget(null);
+            setHomeToken((t) => t + 1);
+            setView(session ? "delta" : "home");
+          }}
+        />
+      )}
+
       {view === "setup" && <Setup onDemo={startDemo} onUpload={startUpload} busy={Boolean(busy)} />}
 
       {view === "blueprint" && (
         <Blueprint
           topics={topics}
-          sessionId={session?.session_id}
           busy={Boolean(busy)}
           onGenerate={buildExam}
           onOpenQuote={(page, quote) => setQuoted({ page, quote })}
@@ -194,7 +261,6 @@ export default function App() {
           grade={grade}
           exam={exam}
           topics={topics}
-          sessionId={session?.session_id}
           busy={Boolean(busy)}
           onRemediate={buildRemediation}
           onOpenQuote={(page, quote) => setQuoted({ page, quote })}

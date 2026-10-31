@@ -5,13 +5,11 @@ import { KnowledgeGraph } from "./KnowledgeGraph";
 
 export function Blueprint({
   topics,
-  sessionId,
   busy,
   onGenerate,
   onOpenQuote,
 }: {
   topics: Topic[];
-  sessionId?: string;
   busy: boolean;
   onGenerate: () => void;
   onOpenQuote?: (page: number, quote: string) => void;
@@ -135,7 +133,6 @@ export function Blueprint({
       {inspectorData && (
         <BacklinksDrawer
           data={inspectorData}
-          sessionId={sessionId}
           onClose={() => setInspectingTopicId(null)}
           onSelectTopic={(id) => setInspectingTopicId(id)}
           onOpenQuote={(page, quote) => onOpenQuote?.(page, quote)}

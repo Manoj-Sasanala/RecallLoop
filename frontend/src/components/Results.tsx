@@ -24,7 +24,6 @@ export function Results({
   grade,
   exam,
   topics = [],
-  sessionId,
   busy,
   onRemediate,
   onOpenQuote,
@@ -32,7 +31,6 @@ export function Results({
   grade: GradeResult;
   exam: Exam;
   topics?: Topic[];
-  sessionId?: string;
   busy: boolean;
   onRemediate: () => void;
   onOpenQuote: (page: number, quote: string) => void;
@@ -477,7 +475,6 @@ export function Results({
       {inspectorData && (
         <BacklinksDrawer
           data={inspectorData}
-          sessionId={sessionId}
           onClose={() => setInspectingTopicId(null)}
           onSelectTopic={(id) => setInspectingTopicId(id)}
           onOpenQuote={(page, quote) => onOpenQuote(page, quote)}

@@ -170,6 +170,37 @@ def test_blueprint_contract_and_session_purge(api):
         assert orphans == []
 
 
+def test_sessions_list_notes_and_revision(api):
+    client, _engine = api
+    created = client.post("/api/v1/sessions", json={"title": "Raft", "demo_bundle_id": "cs_raft"})
+    session_id = created.json()["session_id"]
+
+    listed = client.get("/api/v1/sessions")
+    assert listed.status_code == 200, listed.text
+    entry = next(s for s in listed.json()["sessions"] if s["session_id"] == session_id)
+    assert entry["rounds"] == 0
+    assert entry["last_mastery"] is None
+
+    notes = client.get(f"/api/v1/sessions/{session_id}/notes")
+    assert notes.status_code == 200, notes.text
+    assert notes.json()["notes_md"] == ""
+
+    saved = client.put(
+        f"/api/v1/sessions/{session_id}/notes", json={"notes_md": "# Leader election\n- leader handles all requests"}
+    )
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["notes_md"].startswith("# Leader election")
+
+    reread = client.get(f"/api/v1/sessions/{session_id}/notes")
+    assert reread.json()["notes_md"].startswith("# Leader election")
+
+    plan = client.get(f"/api/v1/sessions/{session_id}/revision")
+    assert plan.status_code == 200, plan.text
+    assert plan.json()["items"] == []
+
+    assert client.get("/api/v1/sessions/00000000-0000-0000-0000-000000000000/notes").status_code == 404
+
+
 def test_upload_reports_pages_and_tokens(api, tmp_path):
     client, _engine = api
     import pymupdf

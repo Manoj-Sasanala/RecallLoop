@@ -1,4 +1,32 @@
-export type Stage = "setup" | "blueprint" | "exam" | "results" | "remediation" | "delta";
+export type SessionSummary = {
+  session_id: string;
+  title: string;
+  course_code: string | null;
+  status: string;
+  demo_bundle_id: string | null;
+  created_at: string;
+  rounds: number;
+  weak_topics: number;
+  last_mastery: number | null;
+};
+
+export type NotesPayload = {
+  session_id: string;
+  notes_md: string;
+  updated_at: string | null;
+};
+
+export type RevisionItem = {
+  topic_id: string;
+  title: string;
+  mastery_score: number;
+  is_flagged_weak: boolean;
+  review_on: string;
+  in_days: number;
+  reason: string;
+};
+
+export type Stage = "home" | "setup" | "blueprint" | "exam" | "results" | "remediation" | "delta";
 
 export type Session = {
   session_id: string;

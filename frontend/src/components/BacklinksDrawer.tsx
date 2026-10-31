@@ -1,6 +1,4 @@
-import { useState } from "react";
 import type { GradedItem, Topic } from "../types";
-import { loadNotes, saveNote, type TopicNote } from "../notes";
 
 export type BacklinksDrawerData = {
   topic: Topic;
@@ -17,13 +15,11 @@ export type BacklinksDrawerData = {
 
 export function BacklinksDrawer({
   data,
-  sessionId,
   onClose,
   onSelectTopic,
   onOpenQuote,
 }: {
   data: BacklinksDrawerData;
-  sessionId?: string;
   onClose: () => void;
   onSelectTopic: (topicId: string) => void;
   onOpenQuote: (page: number, quote: string) => void;
@@ -42,10 +38,6 @@ export function BacklinksDrawer({
   } = data;
 
   const docId = topic.page_refs[0]?.doc_id ?? "";
-
-  const [note, setNote] = useState<TopicNote>(() =>
-    sessionId ? loadNotes(sessionId)[topic.topic_id] ?? { text: "", reviseBy: "" } : { text: "", reviseBy: "" },
-  );
 
   const statusTone = isFlaggedWeak
     ? "weak"
@@ -221,78 +213,7 @@ export function BacklinksDrawer({
             )}
           </div>
 
-          {/* My Notes */}
-        <div className="panel" style={{ padding: "14px 16px", marginBottom: 16 }}>
-          <h3 style={{ fontSize: "0.92rem", marginBottom: 10 }}>My notes</h3>
-          <label className="small muted" htmlFor={`notes-${topic.topic_id}`}>
-            Your own words. Saved in this browser, included in the export.
-          </label>
-          <textarea
-            id={`notes-${topic.topic_id}`}
-            value={note.text}
-            onChange={(e) => {
-              const next = { ...note, text: e.target.value };
-              setNote(next);
-              if (sessionId) saveNote(sessionId, topic.topic_id, next);
-            }}
-            rows={3}
-            placeholder="e.g. Leader election = timeout, not the client. Remember T1 → T2."
-            style={{
-              width: "100%",
-              font: "inherit",
-              fontSize: "0.85rem",
-              padding: "8px 10px",
-              marginTop: 6,
-              border: "1px solid var(--line-strong)",
-              borderRadius: "var(--radius)",
-              background: "var(--paper)",
-              resize: "vertical",
-            }}
-          />
-          <div className="row" style={{ marginTop: 8 }}>
-            <label className="small muted" htmlFor={`revise-${topic.topic_id}`}>
-              Revise by
-            </label>
-            <input
-              id={`revise-${topic.topic_id}`}
-              type="date"
-              value={note.reviseBy}
-              onChange={(e) => {
-                const next = { ...note, reviseBy: e.target.value };
-                setNote(next);
-                if (sessionId) saveNote(sessionId, topic.topic_id, next);
-              }}
-              style={{
-                font: "inherit",
-                fontSize: "0.82rem",
-                padding: "6px 8px",
-                border: "1px solid var(--line-strong)",
-                borderRadius: "var(--radius)",
-                background: "var(--paper)",
-              }}
-            />
-            {note.reviseBy && (
-              <span className="badge warn">
-                {new Date(`${note.reviseBy}T00:00:00`) < new Date(new Date().toDateString()) ? "overdue" : "scheduled"}
-              </span>
-            )}
-            <span className="spacer" />
-            {(note.text.trim() || note.reviseBy) && (
-              <button
-                className="btn ghost small"
-                onClick={() => {
-                  const next = { text: "", reviseBy: "" };
-                  setNote(next);
-                  if (sessionId) saveNote(sessionId, topic.topic_id, next);
-                }}
-              >
-                Clear
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Linked Questions Tested */}
+          {/* Linked Questions Tested */}
           {testedQuestions.length > 0 && (
             <div className="panel" style={{ padding: "14px 16px" }}>
               <h3 style={{ fontSize: "0.92rem", marginBottom: 10 }}>

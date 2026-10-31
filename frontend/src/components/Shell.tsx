@@ -7,11 +7,13 @@ export function Shell({
   activeStep,
   session,
   onPurge,
+  onHome,
   children,
 }: {
   activeStep: number;
   session: Session | null;
   onPurge?: () => void;
+  onHome?: () => void;
   children: ReactNode;
 }) {
   return (
@@ -23,6 +25,11 @@ export function Shell({
             <span className="brand-name">RecallLoop</span>
           </div>
           <div className="brand-sub">Exam readiness, measured</div>
+          {onHome && (
+            <button className="btn ghost small" style={{ marginTop: 8, paddingLeft: 0 }} onClick={onHome}>
+              ← All sessions
+            </button>
+          )}
         </div>
 
         <ol className="steps" aria-label="Progress">

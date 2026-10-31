@@ -1,5 +1,6 @@
+import { useState } from "react";
+import { getNotes } from "../api";
 import type { Delta, GradeResult, RemediationPlan } from "../types";
-import { loadNotes } from "../notes";
 
 const pts = (value: number) => `${value >= 0 ? "+" : ""}${Math.round(value * 100)} pts`;
 
@@ -8,6 +9,7 @@ function studyPageMarkdown(
   grade: GradeResult | null,
   plan: RemediationPlan | null,
   delta: Delta,
+  notesMd: string,
 ): string {
   const lines = [`# ${title} - study page`, "", "_Exported from RecallLoop. Copy this into your own notes._", ""];
   lines.push("## Before / after");
@@ -26,25 +28,9 @@ function studyPageMarkdown(
       lines.push(`- ${card.corrective_explanation_md}`, "");
     }
   }
-  if (plan && plan.remediation_cards.length > 0) {
-    const notes = loadNotes(delta.session_id);
-    const noted = plan.remediation_cards.filter((c) => {
-      const n = notes[c.topic_id];
-      return n && (n.text.trim() || n.reviseBy);
-    });
-    if (noted.length > 0) {
-      lines.push("## My notes & revision dates");
-      for (const card of noted) {
-        const n = notes[card.topic_id];
-        lines.push(`### ${card.topic_title}`);
-        if (n.text.trim()) lines.push(n.text.trim());
-        if (n.reviseBy) lines.push(`- Revise by: ${n.reviseBy}`);
-        lines.push("");
-      }
-    }
-  }
   if (grade) {
-    lines.push("## Item review");    for (const item of grade.graded_items) {
+    lines.push("## Item review");
+    for (const item of grade.graded_items) {
       const mark = item.is_correct ? "correct" : "wrong";
       lines.push(`- [${mark}] ${item.stem}`);
       if (!item.is_correct) {
@@ -53,6 +39,9 @@ function studyPageMarkdown(
         lines.push(`  - Why: "${item.verbatim_source_quote}" (p.${item.source_page_number})`);
       }
     }
+  }
+  if (notesMd.trim()) {
+    lines.push("## My notes", "", notesMd.trim(), "");
   }
   return `${lines.join("\n")}\n`;
 }
@@ -77,6 +66,37 @@ export function DeltaView({
   const masteryDelta = last.mastery_score - first.mastery_score;
   const accuracyDelta = last.raw_accuracy - first.raw_accuracy;
   const calibrationDelta = last.mce_score - first.mce_score;
+  const [copied, setCopied] = useState(false);
+  const [shareError, setShareError] = useState<string | null>(null);
+
+  const slug = sessionTitle.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+
+  const buildPage = async () => {
+    const notes = await getNotes(delta.session_id).catch(() => ({ notes_md: "" }));
+    return studyPageMarkdown(sessionTitle, grade, plan, delta, notes.notes_md ?? "");
+  };
+
+  const download = async () => {
+    const md = await buildPage();
+    const blob = new Blob([md], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${slug}-study-page.md`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const copyShareText = async () => {
+    setShareError(null);
+    try {
+      await navigator.clipboard.writeText(await buildPage());
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setShareError("Copy blocked by the browser — use the download instead.");
+    }
+  };
 
   return (
     <>
@@ -182,24 +202,21 @@ export function DeltaView({
           <div>
             <h2>Take this page with you.</h2>
             <p className="small muted" style={{ marginTop: 4 }}>
-              One Markdown file: before/after, what to fix, and every item reviewed. Paste it into your own notes.
+              One Markdown file: before/after, what to fix, every item reviewed, plus your notes. Download it or copy
+              the text to share anywhere.
             </p>
+            {shareError && (
+              <p className="error small" style={{ marginTop: 8 }}>
+                {shareError}
+              </p>
+            )}
           </div>
           <span className="spacer" />
-          <button
-            className="btn"
-            onClick={() => {
-              const md = studyPageMarkdown(sessionTitle, grade, plan, delta);
-              const blob = new Blob([md], { type: "text/markdown" });
-              const url = URL.createObjectURL(blob);
-              const link = document.createElement("a");
-              link.href = url;
-              link.download = `${sessionTitle.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-study-page.md`;
-              link.click();
-              URL.revokeObjectURL(url);
-            }}
-          >
+          <button className="btn" onClick={() => void download()}>
             Export study page
+          </button>
+          <button className="btn" onClick={() => void copyShareText()}>
+            {copied ? "Copied!" : "Copy share text"}
           </button>
         </div>
       </div>
