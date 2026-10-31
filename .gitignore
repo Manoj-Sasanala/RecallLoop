@@ -1,0 +1,23 @@
+# secrets
+.env
+.env.*config
+!.env.example
+
+# python
+.venv/
+__pycache__/
+.pytest_cache/
+
+# data
+*.db
+*.db-wal
+*.db-shm
+
+# node
+node_modules/
+
+# frontend build
+dist/
+
+# internal spec doc (not part of the submission)
+RecallLoop Architecture and PRD.md
