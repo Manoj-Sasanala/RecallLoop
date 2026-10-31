@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { getNotes, saveNotes } from "../api";
+import { getNotes, getRevision, saveNotes } from "../api";
 
 // Plain markdown notes per session, autosaved. Exported with the study page.
+// "Draft from revision plan" seeds a checklist from the latest diagnosis.
 export function NotesView({ sessionId, title, onBack }: { sessionId: string; title: string; onBack: () => void }) {
   const [text, setText] = useState<string | null>(null);
   const [saved, setSaved] = useState(true);
@@ -17,6 +18,25 @@ export function NotesView({ sessionId, title, onBack }: { sessionId: string; tit
       live = false;
     };
   }, [sessionId]);
+
+  const draftFromPlan = () => {
+    setError(null);
+    getRevision(sessionId)
+      .then((plan) => {
+        if (plan.items.length === 0) {
+          setError("No graded rounds yet — sit an exam first, then draft from the diagnosis.");
+          return;
+        }
+        const lines = ["# Revision checklist", ""];
+        for (const item of plan.items) {
+          const box = item.is_flagged_weak ? " " : "x";
+          lines.push(`- [${box}] ${item.title} — revise by ${item.review_on} (${item.reason})`);
+        }
+        lines.push("", "## My notes", "", "- ");
+        edit(`${text === null || text.trim() ? "" : `${text.trim()}\n\n`}${lines.join("\n")}`);
+      })
+      .catch((err: Error) => setError(err.message));
+  };
 
   const edit = (value: string) => {
     setText(value);
@@ -76,6 +96,9 @@ export function NotesView({ sessionId, title, onBack }: { sessionId: string; tit
           <div className="row mt-16">
             <button className="btn" onClick={onBack}>
               Back
+            </button>
+            <button className="btn" onClick={draftFromPlan}>
+              Draft from revision plan
             </button>
           </div>
         </section>
