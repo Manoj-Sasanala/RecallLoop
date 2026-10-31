@@ -1,14 +1,17 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   createSession,
   deleteSession,
   extractBlueprint,
   generateExam,
   getDelta,
+  getPlan,
+  getRevision,
   remediate,
   submitExam,
   uploadDocuments,
 } from "./api";
+import { Assistant, type AssistantContext } from "./components/Assistant";
 import { Blueprint } from "./components/Blueprint";
 import { DeltaView } from "./components/DeltaView";
 import { Exam } from "./components/Exam";
@@ -25,7 +28,9 @@ import type {
   Exam as ExamData,
   GradeResult,
   RemediationPlan,
+  RevisionItem,
   Session,
+  SessionPlan,
   SessionSummary,
   Stage,
   Topic,
@@ -55,6 +60,9 @@ export default function App() {
   const [view, setView] = useState<View>("home");
   const [homeToken, setHomeToken] = useState(0);
   const [notesTarget, setNotesTarget] = useState<SessionSummary | null>(null);
+  const [assistantPlan, setAssistantPlan] = useState<SessionPlan | null>(null);
+  const [assistantRevision, setAssistantRevision] = useState<RevisionItem[]>([]);
+  const [assistantDelta, setAssistantDelta] = useState<Delta | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [topics, setTopics] = useState<Topic[]>([]);
   const [exam, setExam] = useState<ExamData | null>(null);
@@ -89,7 +97,33 @@ export default function App() {
     setError(null);
     setQuoted(null);
     setNotesTarget(null);
+    setAssistantPlan(null);
+    setAssistantRevision([]);
+    setAssistantDelta(null);
   };
+
+  useEffect(() => {
+    const id = session?.session_id;
+    if (!id) {
+      setAssistantPlan(null);
+      setAssistantRevision([]);
+      setAssistantDelta(null);
+      return;
+    }
+    let live = true;
+    getPlan(id)
+      .then((p) => live && setAssistantPlan(p))
+      .catch(() => undefined);
+    getRevision(id)
+      .then((r) => live && setAssistantRevision(r.items))
+      .catch(() => undefined);
+    getDelta(id)
+      .then((d) => live && setAssistantDelta(d))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [session?.session_id, delta?.rounds.length, grade?.exam_attempt_id]);
 
   const openSession = (summary: SessionSummary) =>
     run("Opening session...", async () => {
@@ -184,26 +218,29 @@ export default function App() {
 
   const docId = topics[0]?.page_refs[0]?.doc_id ?? "";
 
+  const assistantCtx = useMemo(assistantContext, [session, grade, delta, assistantPlan, assistantRevision, assistantDelta]);
+
   return (
-    <Shell
-      activeStep={STEP_BY_VIEW[view]}
-      session={session}
-      onPurge={
-        session
-          ? () =>
-              run("Deleting session data...", async () => {
-                if (!window.confirm(`Delete "${session.title}" and all its data?`)) return;
-                await deleteSession(session.session_id);
-                reset();
-              })
-          : undefined
-      }
-      onHome={() => {
-        setSession(null);
-        setView("home");
-        setHomeToken((t) => t + 1);
-      }}
-    >
+    <>
+      <Shell
+        activeStep={STEP_BY_VIEW[view]}
+        session={session}
+        onPurge={
+          session
+            ? () =>
+                run("Deleting session data...", async () => {
+                  if (!window.confirm(`Delete "${session.title}" and all its data?`)) return;
+                  await deleteSession(session.session_id);
+                  reset();
+                })
+            : undefined
+        }
+        onHome={() => {
+          setSession(null);
+          setView("home");
+          setHomeToken((t) => t + 1);
+        }}
+      >
       {error && (
         <div className="error" role="alert" style={{ marginBottom: 16 }}>
           {error}
@@ -292,6 +329,41 @@ export default function App() {
       {quoted && docId && (
         <QuoteDrawer docId={docId} page={quoted.page} quote={quoted.quote} onClose={() => setQuoted(null)} />
       )}
-    </Shell>
+      </Shell>
+      <Assistant context={assistantCtx} />
+    </>
   );
+
+  function assistantContext(): AssistantContext {
+    const liveDelta = delta ?? assistantDelta;
+    const weak = (
+      grade?.topic_breakdown.filter((t) => t.is_flagged_weak).map((t) => ({ title: t.title })) ?? []
+    );
+    const weakFallback =
+      weak.length > 0
+        ? weak
+        : assistantRevision.filter((r) => r.is_flagged_weak).map((r) => ({ title: r.title }));
+    const rounds = liveDelta?.rounds.length ?? (grade ? 1 : 0);
+    const lastMastery =
+      liveDelta && liveDelta.rounds.length > 0
+        ? liveDelta.rounds[liveDelta.rounds.length - 1].mastery_score
+        : (grade?.summary.mastery_score ?? null);
+    const next = assistantRevision[0];
+    const examDate = assistantPlan?.exam_date ?? null;
+    let countdown: string | null = null;
+    if (examDate) {
+      const days = Math.round(
+        (new Date(examDate + "T00:00:00").getTime() - new Date().setHours(0, 0, 0, 0)) / 86400000,
+      );
+      countdown = days >= 0 ? `Exam in ${days} days (${assistantPlan?.stage.replace("_", " ")}).` : "Exam date passed.";
+    }
+    return {
+      sessionTitle: session?.title ?? null,
+      rounds,
+      lastMastery,
+      weakTopics: weakFallback,
+      reviseNext: next ? `Revise ${next.title} by ${next.review_on}.` : null,
+      examCountdown: countdown,
+    };
+  }
 }
