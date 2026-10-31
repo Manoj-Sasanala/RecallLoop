@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { getRevision, listSessions } from "../api";
+import { DailyProgress } from "./DailyProgress";
 import { RevisionCalendar } from "./RevisionCalendar";
 import type { RevisionItem, SessionSummary } from "../types";
 
@@ -26,7 +27,7 @@ export function Home({
   const [sessions, setSessions] = useState<SessionSummary[] | null>(null);
   const [revise, setRevise] = useState<Record<string, string>>({});
   const [plans, setPlans] = useState<Record<string, RevisionItem[]>>({});
-  const [tab, setTab] = useState<"sessions" | "planner">("sessions");
+  const [tab, setTab] = useState<"sessions" | "planner" | "progress">("sessions");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -110,9 +111,19 @@ export function Home({
             >
               Planner
             </button>
+            <button
+              className={`btn small ${tab === "progress" ? "primary" : ""}`}
+              role="tab"
+              aria-selected={tab === "progress"}
+              onClick={() => setTab("progress")}
+            >
+              Progress
+            </button>
           </div>
           {tab === "planner" ? (
             <RevisionCalendar sessions={sessions} plans={plans} />
+          ) : tab === "progress" ? (
+            <DailyProgress sessions={sessions} />
           ) : (
           <div className="stack">
             {sessions.map((s) => (
