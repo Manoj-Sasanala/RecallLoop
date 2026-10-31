@@ -175,7 +175,14 @@ export default function App() {
 
       {view === "setup" && <Setup onDemo={startDemo} onUpload={startUpload} busy={Boolean(busy)} />}
 
-      {view === "blueprint" && <Blueprint topics={topics} busy={Boolean(busy)} onGenerate={buildExam} />}
+      {view === "blueprint" && (
+        <Blueprint
+          topics={topics}
+          busy={Boolean(busy)}
+          onGenerate={buildExam}
+          onOpenQuote={(page, quote) => setQuoted({ page, quote })}
+        />
+      )}
 
       {view === "exam" && exam && (
         <Exam exam={exam} mode="diagnostic" busy={Boolean(busy)} onSubmit={gradeExam} />
@@ -185,6 +192,7 @@ export default function App() {
         <Results
           grade={grade}
           exam={exam}
+          topics={topics}
           busy={Boolean(busy)}
           onRemediate={buildRemediation}
           onOpenQuote={(page, quote) => setQuoted({ page, quote })}
