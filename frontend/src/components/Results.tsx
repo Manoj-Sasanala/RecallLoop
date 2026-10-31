@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import type { Exam, GradeResult, Topic } from "../types";
 import { BacklinksDrawer, type BacklinksDrawerData } from "./BacklinksDrawer";
 import { KnowledgeGraph, type TopicMasteryInfo } from "./KnowledgeGraph";
+import { MasteryBoard } from "./MasteryBoard";
 
 const STATE_LABEL: Record<string, string> = {
   MASTERED: "Mastered",
@@ -23,6 +24,7 @@ export function Results({
   grade,
   exam,
   topics = [],
+  sessionId,
   busy,
   onRemediate,
   onOpenQuote,
@@ -30,11 +32,12 @@ export function Results({
   grade: GradeResult;
   exam: Exam;
   topics?: Topic[];
+  sessionId?: string;
   busy: boolean;
   onRemediate: () => void;
   onOpenQuote: (page: number, quote: string) => void;
 }) {
-  const [activeTab, setActiveTab] = useState<"diagnosis" | "graph">("diagnosis");
+  const [activeTab, setActiveTab] = useState<"diagnosis" | "board" | "graph">("diagnosis");
   const [inspectingTopicId, setInspectingTopicId] = useState<string | null>(null);
   const [itemFilter, setItemFilter] = useState<string>("ALL");
   const [searchQuery, setSearchQuery] = useState<string>("");
@@ -162,26 +165,52 @@ export function Results({
         </div>
       </div>
 
-      {/* View Switch: Diagnosis Matrix vs Knowledge Mastery Graph */}
+      {/* Notion-Style Multi-View Database Switcher: Diagnosis Matrix vs Notion Kanban Board vs Obsidian Knowledge Graph */}
       <div className="row mt-16" style={{ justifyContent: "space-between", alignItems: "center" }}>
         <div className="row" style={{ gap: 6 }}>
           <button
             className={`btn small ${activeTab === "diagnosis" ? "primary" : ""}`}
             onClick={() => setActiveTab("diagnosis")}
           >
-            📊 Metacognitive Matrix & Table
+            📊 Metacognitive Matrix &amp; Table
+          </button>
+          <button
+            className={`btn small ${activeTab === "board" ? "primary" : ""}`}
+            onClick={() => setActiveTab("board")}
+          >
+            📋 Mastery Board (Notion Kanban)
           </button>
           <button
             className={`btn small ${activeTab === "graph" ? "primary" : ""}`}
             onClick={() => setActiveTab("graph")}
           >
-            🌐 Knowledge Mastery Graph (Obsidian View)
+            🌐 Knowledge Graph (Obsidian View)
           </button>
         </div>
         <span className="small muted">
-          {topics.length > 0 ? `${topics.length} topics mapped with live mastery status` : ""}
+          {topics.length > 0 ? `${topics.length} topics mapped with live diagnostic status` : ""}
         </span>
       </div>
+
+      {activeTab === "board" && (
+        <section className="panel mt-16" aria-labelledby="notion-board-heading">
+          <div className="panel-head">
+            <div>
+              <h2 id="notion-board-heading">Notion-Style Mastery Progression Board</h2>
+              <span className="hint">
+                Interactive Kanban workflow &middot; Group by topics or question diagnostic states &middot; Rollups &amp; properties
+              </span>
+            </div>
+          </div>
+          <MasteryBoard
+            grade={grade}
+            exam={exam}
+            topics={topics}
+            onInspectTopic={(id) => setInspectingTopicId(id)}
+            onOpenQuote={onOpenQuote}
+          />
+        </section>
+      )}
 
       {activeTab === "graph" && topics.length > 0 && (
         <section className="panel mt-16" aria-labelledby="knowledge-mastery-heading">
@@ -448,6 +477,7 @@ export function Results({
       {inspectorData && (
         <BacklinksDrawer
           data={inspectorData}
+          sessionId={sessionId}
           onClose={() => setInspectingTopicId(null)}
           onSelectTopic={(id) => setInspectingTopicId(id)}
           onOpenQuote={(page, quote) => onOpenQuote(page, quote)}

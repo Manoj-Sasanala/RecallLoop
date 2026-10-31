@@ -178,6 +178,7 @@ export default function App() {
       {view === "blueprint" && (
         <Blueprint
           topics={topics}
+          sessionId={session?.session_id}
           busy={Boolean(busy)}
           onGenerate={buildExam}
           onOpenQuote={(page, quote) => setQuoted({ page, quote })}
@@ -193,13 +194,21 @@ export default function App() {
           grade={grade}
           exam={exam}
           topics={topics}
+          sessionId={session?.session_id}
           busy={Boolean(busy)}
           onRemediate={buildRemediation}
           onOpenQuote={(page, quote) => setQuoted({ page, quote })}
         />
       )}
 
-      {view === "remediation" && plan && <Remediation plan={plan} busy={Boolean(busy)} onRetest={startRetest} />}
+      {view === "remediation" && plan && (
+        <Remediation
+          plan={plan}
+          busy={Boolean(busy)}
+          onRetest={startRetest}
+          onOpenQuote={(page, quote) => setQuoted({ page, quote })}
+        />
+      )}
 
       {view === "retest" && exam && <Exam exam={exam} mode="retest" busy={Boolean(busy)} onSubmit={gradeRetest} />}
 

@@ -1,4 +1,5 @@
 import type { Delta, GradeResult, RemediationPlan } from "../types";
+import { loadNotes } from "../notes";
 
 const pts = (value: number) => `${value >= 0 ? "+" : ""}${Math.round(value * 100)} pts`;
 
@@ -25,9 +26,25 @@ function studyPageMarkdown(
       lines.push(`- ${card.corrective_explanation_md}`, "");
     }
   }
+  if (plan && plan.remediation_cards.length > 0) {
+    const notes = loadNotes(delta.session_id);
+    const noted = plan.remediation_cards.filter((c) => {
+      const n = notes[c.topic_id];
+      return n && (n.text.trim() || n.reviseBy);
+    });
+    if (noted.length > 0) {
+      lines.push("## My notes & revision dates");
+      for (const card of noted) {
+        const n = notes[card.topic_id];
+        lines.push(`### ${card.topic_title}`);
+        if (n.text.trim()) lines.push(n.text.trim());
+        if (n.reviseBy) lines.push(`- Revise by: ${n.reviseBy}`);
+        lines.push("");
+      }
+    }
+  }
   if (grade) {
-    lines.push("## Item review");
-    for (const item of grade.graded_items) {
+    lines.push("## Item review");    for (const item of grade.graded_items) {
       const mark = item.is_correct ? "correct" : "wrong";
       lines.push(`- [${mark}] ${item.stem}`);
       if (!item.is_correct) {
