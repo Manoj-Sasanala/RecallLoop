@@ -196,7 +196,14 @@ export default function App() {
       {view === "retest" && exam && <Exam exam={exam} mode="retest" busy={Boolean(busy)} onSubmit={gradeRetest} />}
 
       {view === "delta" && delta && (
-        <DeltaView delta={delta} mode={session?.demo_bundle_id ? "demo" : "uploaded"} onRestart={reset} />
+        <DeltaView
+          delta={delta}
+          grade={grade}
+          plan={plan}
+          sessionTitle={session?.title ?? "session"}
+          mode={session?.demo_bundle_id ? "demo" : "uploaded"}
+          onRestart={reset}
+        />
       )}
 
       {quoted && docId && (

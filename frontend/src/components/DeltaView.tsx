@@ -1,8 +1,60 @@
-import type { Delta } from "../types";
+import type { Delta, GradeResult, RemediationPlan } from "../types";
 
 const pts = (value: number) => `${value >= 0 ? "+" : ""}${Math.round(value * 100)} pts`;
 
-export function DeltaView({ delta, mode, onRestart }: { delta: Delta; mode: "demo" | "uploaded"; onRestart: () => void }) {
+function studyPageMarkdown(
+  title: string,
+  grade: GradeResult | null,
+  plan: RemediationPlan | null,
+  delta: Delta,
+): string {
+  const lines = [`# ${title} - study page`, "", "_Exported from RecallLoop. Copy this into your own notes._", ""];
+  lines.push("## Before / after");
+  for (const round of delta.rounds) {
+    lines.push(
+      `- Round ${round.round_number}: mastery ${Math.round((round.mastery_score ?? 0) * 100)}%, accuracy ${Math.round((round.raw_accuracy ?? 0) * 100)}%, calibration error ${(round.mce_score ?? 0).toFixed(2)}`,
+    );
+  }
+  lines.push(`- Lures resolved: ${Math.round(delta.lure_resolution_rate * 100)}%`, "");
+  if (plan && plan.remediation_cards.length > 0) {
+    lines.push("## What to fix");
+    for (const card of plan.remediation_cards) {
+      lines.push(`### ${card.topic_title}`);
+      if (card.trapped_misconception) lines.push(`- Wrong belief: \`${card.trapped_misconception}\``);
+      lines.push(`- Source (p.${card.source_page}): "${card.source_truth_quote}"`);
+      lines.push(`- ${card.corrective_explanation_md}`, "");
+    }
+  }
+  if (grade) {
+    lines.push("## Item review");
+    for (const item of grade.graded_items) {
+      const mark = item.is_correct ? "correct" : "wrong";
+      lines.push(`- [${mark}] ${item.stem}`);
+      if (!item.is_correct) {
+        lines.push(`  - You picked: ${item.selected_option_text}`);
+        lines.push(`  - Right answer: ${item.correct_option_id}`);
+        lines.push(`  - Why: "${item.verbatim_source_quote}" (p.${item.source_page_number})`);
+      }
+    }
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+export function DeltaView({
+  delta,
+  grade,
+  plan,
+  sessionTitle,
+  mode,
+  onRestart,
+}: {
+  delta: Delta;
+  grade: GradeResult | null;
+  plan: RemediationPlan | null;
+  sessionTitle: string;
+  mode: "demo" | "uploaded";
+  onRestart: () => void;
+}) {
   const first = delta.rounds[0];
   const last = delta.rounds[delta.rounds.length - 1];
   const masteryDelta = last.mastery_score - first.mastery_score;
@@ -106,6 +158,33 @@ export function DeltaView({ delta, mode, onRestart }: { delta: Delta; mode: "dem
             </tbody>
           </table>
         </section>
+      </div>
+
+      <div className="panel mt-16">
+        <div className="row">
+          <div>
+            <h2>Take this page with you.</h2>
+            <p className="small muted" style={{ marginTop: 4 }}>
+              One Markdown file: before/after, what to fix, and every item reviewed. Paste it into your own notes.
+            </p>
+          </div>
+          <span className="spacer" />
+          <button
+            className="btn"
+            onClick={() => {
+              const md = studyPageMarkdown(sessionTitle, grade, plan, delta);
+              const blob = new Blob([md], { type: "text/markdown" });
+              const url = URL.createObjectURL(blob);
+              const link = document.createElement("a");
+              link.href = url;
+              link.download = `${sessionTitle.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-study-page.md`;
+              link.click();
+              URL.revokeObjectURL(url);
+            }}
+          >
+            Export study page
+          </button>
+        </div>
       </div>
 
       <div className="panel mt-16">
