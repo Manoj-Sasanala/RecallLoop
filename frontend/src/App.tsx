@@ -7,11 +7,12 @@ import {
   getDelta,
   getPlan,
   getRevision,
+  listSessions,
   remediate,
   submitExam,
   uploadDocuments,
 } from "./api";
-import { Assistant, type AssistantContext } from "./components/Assistant";
+import { Assistant, type AssistantActions, type AssistantContext, type AssistantSessionRef } from "./components/Assistant";
 import { Blueprint } from "./components/Blueprint";
 import { DeltaView } from "./components/DeltaView";
 import { Exam } from "./components/Exam";
@@ -63,6 +64,7 @@ export default function App() {
   const [assistantPlan, setAssistantPlan] = useState<SessionPlan | null>(null);
   const [assistantRevision, setAssistantRevision] = useState<RevisionItem[]>([]);
   const [assistantDelta, setAssistantDelta] = useState<Delta | null>(null);
+  const [assistantSessions, setAssistantSessions] = useState<AssistantSessionRef[]>([]);
   const [session, setSession] = useState<Session | null>(null);
   const [topics, setTopics] = useState<Topic[]>([]);
   const [exam, setExam] = useState<ExamData | null>(null);
@@ -103,6 +105,16 @@ export default function App() {
   };
 
   useEffect(() => {
+    let live = true;
+    listSessions()
+      .then((body) => live && setAssistantSessions(body.sessions.map((s) => ({ id: s.session_id, title: s.title }))))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [homeToken, session?.session_id]);
+
+  useEffect(() => {
     const id = session?.session_id;
     if (!id) {
       setAssistantPlan(null);
@@ -123,7 +135,7 @@ export default function App() {
     return () => {
       live = false;
     };
-  }, [session?.session_id, delta?.rounds.length, grade?.exam_attempt_id]);
+  }, [session?.session_id, delta?.rounds.length, grade?.exam_attempt_id, homeToken]);
 
   const openSession = (summary: SessionSummary) =>
     run("Opening session...", async () => {
@@ -218,7 +230,33 @@ export default function App() {
 
   const docId = topics[0]?.page_refs[0]?.doc_id ?? "";
 
-  const assistantCtx = useMemo(assistantContext, [session, grade, delta, assistantPlan, assistantRevision, assistantDelta]);
+  const assistantActs: AssistantActions = {
+    goHome: () => {
+      setSession(null);
+      setView("home");
+      setHomeToken((t) => t + 1);
+    },
+    openSession: (id: string) => {
+      const found = assistantSessions.find((s) => s.id === id);
+      if (!found) return;
+      openSession({ session_id: found.id, title: found.title } as SessionSummary);
+    },
+    openNotes: () => {
+      if (!session) return;
+      setNotesTarget({ session_id: session.session_id, title: session.title } as SessionSummary);
+      setView("notes");
+    },
+    purgeCurrent: () => {
+      if (!session) return;
+      void run("Deleting session data...", async () => {
+        if (!window.confirm(`Delete "${session.title}" and all its data?`)) return;
+        await deleteSession(session.session_id);
+        reset();
+      });
+    },
+  };
+
+  const assistantCtx = useMemo(assistantContext, [session, grade, delta, assistantPlan, assistantRevision, assistantDelta, assistantSessions, view]);
 
   return (
     <>
@@ -330,7 +368,7 @@ export default function App() {
         <QuoteDrawer docId={docId} page={quoted.page} quote={quoted.quote} onClose={() => setQuoted(null)} />
       )}
       </Shell>
-      <Assistant context={assistantCtx} />
+      <Assistant context={assistantCtx} actions={assistantActs} />
     </>
   );
 
@@ -358,12 +396,14 @@ export default function App() {
       countdown = days >= 0 ? `Exam in ${days} days (${assistantPlan?.stage.replace("_", " ")}).` : "Exam date passed.";
     }
     return {
+      view,
       sessionTitle: session?.title ?? null,
       rounds,
       lastMastery,
       weakTopics: weakFallback,
       reviseNext: next ? `Revise ${next.title} by ${next.review_on}.` : null,
       examCountdown: countdown,
+      sessions: assistantSessions,
     };
   }
 }
