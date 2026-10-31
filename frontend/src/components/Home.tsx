@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { getRevision, listSessions } from "../api";
-import type { SessionSummary } from "../types";
+import { RevisionCalendar } from "./RevisionCalendar";
+import type { RevisionItem, SessionSummary } from "../types";
 
 function fmtDate(iso: string | null): string {
   if (!iso) return "—";
@@ -24,6 +25,8 @@ export function Home({
 }) {
   const [sessions, setSessions] = useState<SessionSummary[] | null>(null);
   const [revise, setRevise] = useState<Record<string, string>>({});
+  const [plans, setPlans] = useState<Record<string, RevisionItem[]>>({});
+  const [tab, setTab] = useState<"sessions" | "planner">("sessions");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -34,10 +37,11 @@ export function Home({
         setSessions(body.sessions);
         for (const s of body.sessions) {
           if (s.rounds === 0) continue;
-          getRevision(s.session_id)
-            .then((plan) => {
-              if (!live || plan.items.length === 0) return;
-              const next = plan.items[0];
+            getRevision(s.session_id)
+              .then((plan) => {
+                if (!live || plan.items.length === 0) return;
+                setPlans((cur) => ({ ...cur, [s.session_id]: plan.items }));
+                const next = plan.items[0];
               setRevise((cur) => ({
                 ...cur,
                 [s.session_id]: `Revise ${next.title} by ${fmtDate(next.review_on)}`,
@@ -88,36 +92,60 @@ export function Home({
         </section>
       )}
       {sessions && sessions.length > 0 && (
-        <div className="stack">
-          {sessions.map((s) => (
-            <section className="panel" key={s.session_id} aria-label={s.title}>
-              <div className="panel-head">
-                <h2>{s.title}</h2>
-                <span className="hint">
-                  {s.rounds} round{s.rounds === 1 ? "" : "s"}
-                  {s.last_mastery !== null ? ` · mastery ${Math.round(s.last_mastery * 100)}%` : ""}
-                </span>
-              </div>
-              <div className="row small muted">
-                <span>Started {fmtDate(s.created_at)}</span>
-                {s.weak_topics > 0 && <span className="badge weak">{s.weak_topics} weak</span>}
-                {revise[s.session_id] && <span className="badge warn">{revise[s.session_id]}</span>}
-              </div>
-              <div className="row mt-16">
-                <button className="btn primary small" onClick={() => onOpen(s)}>
-                  Open
-                </button>
-                <button className="btn small" onClick={() => onNotes(s)}>
-                  Notes
-                </button>
-                <span className="spacer" />
-                <button className="btn ghost small" onClick={() => onPurge(s)}>
-                  Purge
-                </button>
-              </div>
-            </section>
-          ))}
-        </div>
+        <>
+          <div className="row" style={{ marginBottom: 12 }} role="tablist" aria-label="Home views">
+            <button
+              className={`btn small ${tab === "sessions" ? "primary" : ""}`}
+              role="tab"
+              aria-selected={tab === "sessions"}
+              onClick={() => setTab("sessions")}
+            >
+              Sessions
+            </button>
+            <button
+              className={`btn small ${tab === "planner" ? "primary" : ""}`}
+              role="tab"
+              aria-selected={tab === "planner"}
+              onClick={() => setTab("planner")}
+            >
+              Planner
+            </button>
+          </div>
+          {tab === "planner" ? (
+            <RevisionCalendar sessions={sessions} plans={plans} />
+          ) : (
+          <div className="stack">
+            {sessions.map((s) => (
+              <section className="panel" key={s.session_id} aria-label={s.title}>
+                <div className="panel-head">
+                  <h2>{s.title}</h2>
+                  <span className="hint">
+                    {s.rounds} round{s.rounds === 1 ? "" : "s"}
+                    {s.last_mastery !== null ? ` · mastery ${Math.round(s.last_mastery * 100)}%` : ""}
+                  </span>
+                </div>
+                <div className="row small muted">
+                  <span>Started {fmtDate(s.created_at)}</span>
+                  {s.weak_topics > 0 && <span className="badge weak">{s.weak_topics} weak</span>}
+                  {revise[s.session_id] && <span className="badge warn">{revise[s.session_id]}</span>}
+                </div>
+                <div className="row mt-16">
+                  <button className="btn primary small" onClick={() => onOpen(s)}>
+                    Open
+                  </button>
+                  <button className="btn small" onClick={() => onNotes(s)}>
+                    Notes
+                  </button>
+                  <span className="spacer" />
+                  <button className="btn ghost small" onClick={() => onPurge(s)}>
+                    Purge
+                  </button>
+                </div>
+              </section>
+            ))}
+          </div>
+          )}
+        </>
       )}
     </>
   );
