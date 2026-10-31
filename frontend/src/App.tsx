@@ -1,6 +1,7 @@
 import { useState } from "react";
 import {
   createSession,
+  deleteSession,
   extractBlueprint,
   generateExam,
   getDelta,
@@ -81,6 +82,13 @@ export default function App() {
     setQuoted(null);
   };
 
+  const purge = () =>
+    run("Deleting session data...", async () => {
+      if (!session) return;
+      await deleteSession(session.session_id);
+      reset();
+    });
+
   const startDemo = (bundleId: string) =>
     run("Preparing the seeded course...", async () => {
       const created = await createSession(bundleId === "med_cardio" ? "Clinical Cardiology" : "Distributed Systems", bundleId);
@@ -152,7 +160,7 @@ export default function App() {
   const docId = topics[0]?.page_refs[0]?.doc_id ?? "";
 
   return (
-    <Shell activeStep={STEP_BY_VIEW[view]} session={session}>
+    <Shell activeStep={STEP_BY_VIEW[view]} session={session} onPurge={session ? purge : undefined}>
       {error && (
         <div className="error" role="alert" style={{ marginBottom: 16 }}>
           {error}

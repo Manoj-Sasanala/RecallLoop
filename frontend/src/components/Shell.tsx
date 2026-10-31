@@ -6,10 +6,12 @@ const STEPS = ["Sources", "Diagnose", "Remediate", "Prove"];
 export function Shell({
   activeStep,
   session,
+  onPurge,
   children,
 }: {
   activeStep: number;
   session: Session | null;
+  onPurge?: () => void;
   children: ReactNode;
 }) {
   return (
@@ -37,6 +39,17 @@ export function Shell({
             <>
               <span className="src">{session.title}</span>
               <span>{session.demo_bundle_id ? "Seeded demo bundle" : "Uploaded material"}</span>
+              {onPurge && (
+                <button
+                  className="btn ghost small"
+                  style={{ justifySelf: "start", paddingLeft: 0 }}
+                  onClick={() => {
+                    if (window.confirm("Delete this session and all its data?")) onPurge();
+                  }}
+                >
+                  Purge session data
+                </button>
+              )}
             </>
           ) : (
             <span>Source-grounded, deterministic scoring.</span>

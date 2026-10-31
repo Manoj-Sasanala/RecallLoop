@@ -19,7 +19,7 @@ from sqlmodel import select
 from app import service
 from app.db import init_db, make_engine
 from app.llm import client_from_env
-from app.models import DocumentPage, ExamAttempt, SourceDocument, StudySession
+from app.models import DocumentPage, ExamAttempt, SourceDocument, StudySession, Topic, TopicEdge
 
 
 class SessionCreate(BaseModel):
@@ -148,6 +148,13 @@ def create_app(engine=None, client=None) -> FastAPI:
     ):
         session = service.get_session(db, session_id)
         topics = service.extract_blueprint(db, session, get_client(), body.target_question_count)
+        prereqs: dict[str, list[str]] = {}
+        for edge in db.exec(select(TopicEdge).where(TopicEdge.session_id == session.id)):
+            dependent = db.get(Topic, edge.dependent_topic_id)
+            prerequisite = db.get(Topic, edge.prerequisite_topic_id)
+            if dependent and prerequisite:
+                prereqs.setdefault(str(dependent.id), []).append(str(prerequisite.id))
+        total_weight = sum(t.syllabus_weight for t in topics) or 1.0
         return {
             "session_id": str(session.id),
             "status": "BLUEPRINT_READY",
@@ -157,8 +164,12 @@ def create_app(engine=None, client=None) -> FastAPI:
                     "code": topic.code,
                     "title": topic.title,
                     "syllabus_weight": topic.syllabus_weight,
+                    "allocated_questions": max(
+                        1, round(topic.syllabus_weight / total_weight * body.target_question_count)
+                    ),
                     "out_degree": topic.out_degree,
                     "page_refs": topic.source_page_refs,
+                    "prerequisites": prereqs.get(str(topic.id), []),
                 }
                 for topic in topics
             ],
@@ -240,5 +251,12 @@ def create_app(engine=None, client=None) -> FastAPI:
         db: DBSession = Depends(db_dep),
     ):
         return service.page_payload(db, document_id, page_number, highlight_quote)
+
+    @app.delete("/api/v1/sessions/{session_id}", status_code=204)
+    def delete_session(session_id: UUID, db: DBSession = Depends(db_dep)):
+        session = service.get_session(db, session_id)
+        db.delete(session)
+        db.commit()
+        return None
 
     return app

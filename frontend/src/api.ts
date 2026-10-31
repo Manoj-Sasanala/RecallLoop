@@ -104,3 +104,8 @@ export function getPage(docId: string, pageNumber: number, quote?: string): Prom
   const query = quote ? `?highlight_quote=${encodeURIComponent(quote)}` : "";
   return request(`/api/v1/documents/${docId}/pages/${pageNumber}${query}`);
 }
+
+export async function deleteSession(sessionId: string): Promise<void> {
+  const response = await fetch(`/api/v1/sessions/${sessionId}`, { method: "DELETE" });
+  if (!response.ok) throw new Error("delete failed");
+}

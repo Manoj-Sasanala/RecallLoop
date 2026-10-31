@@ -145,6 +145,25 @@ def test_missing_session_and_unknown_bundle(api):
     assert bad.status_code == 400
 
 
+def test_blueprint_contract_and_session_purge(api):
+    client, _engine = api
+    created = client.post("/api/v1/sessions", json={"title": "Raft", "demo_bundle_id": "cs_raft"})
+    session_id = created.json()["session_id"]
+
+    blueprint = client.post(f"/api/v1/sessions/{session_id}/blueprint/extract", json={"target_question_count": 8})
+    assert blueprint.status_code == 200, blueprint.text
+    topics = blueprint.json()["topics"]
+    assert len(topics) == 2
+    assert sum(t["allocated_questions"] for t in topics) >= 2
+    by_code = {t["code"]: t for t in topics}
+    assert by_code["T2"]["prerequisites"] == [by_code["T1"]["topic_id"]]
+    assert by_code["T1"]["prerequisites"] == []
+
+    deleted = client.delete(f"/api/v1/sessions/{session_id}")
+    assert deleted.status_code == 204, deleted.text
+    assert client.get(f"/api/v1/sessions/{session_id}").status_code == 404
+
+
 def test_upload_reports_pages_and_tokens(api, tmp_path):
     client, _engine = api
     import pymupdf
