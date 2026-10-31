@@ -8,6 +8,7 @@ import type {
   RemediationPlan,
   RevisionItem,
   Session,
+  SessionPlan,
   SessionSummary,
   Topic,
 } from "./types";
@@ -121,6 +122,18 @@ export function saveNotes(sessionId: string, notesMd: string): Promise<NotesPayl
 
 export function getRevision(sessionId: string): Promise<{ session_id: string; items: RevisionItem[] }> {
   return request(`/api/v1/sessions/${sessionId}/revision`);
+}
+
+export function getPlan(sessionId: string): Promise<SessionPlan> {
+  return request(`/api/v1/sessions/${sessionId}/plan`);
+}
+
+export function savePlan(sessionId: string, examDate: string | null, stage: string): Promise<SessionPlan> {
+  return request(`/api/v1/sessions/${sessionId}/plan`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ exam_date: examDate, stage }),
+  });
 }
 
 export function getPage(docId: string, pageNumber: number, quote?: string): Promise<PagePayload> {

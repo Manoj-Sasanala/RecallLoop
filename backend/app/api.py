@@ -57,6 +57,11 @@ class NotesRequest(BaseModel):
     notes_md: str = ""
 
 
+class PlanRequest(BaseModel):
+    exam_date: str | None = None
+    stage: str = "FULL"
+
+
 def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
@@ -130,6 +135,14 @@ def create_app(engine=None, client=None) -> FastAPI:
     @app.put("/api/v1/sessions/{session_id}/notes")
     def write_notes(session_id: UUID, body: NotesRequest, db: DBSession = Depends(db_dep)):
         return service.save_notes(db, service.get_session(db, session_id), body.notes_md)
+
+    @app.get("/api/v1/sessions/{session_id}/plan")
+    def read_plan(session_id: UUID, db: DBSession = Depends(db_dep)):
+        return service.get_plan(db, service.get_session(db, session_id))
+
+    @app.put("/api/v1/sessions/{session_id}/plan")
+    def write_plan(session_id: UUID, body: PlanRequest, db: DBSession = Depends(db_dep)):
+        return service.save_plan(db, service.get_session(db, session_id), body.exam_date, body.stage)
 
     @app.get("/api/v1/sessions/{session_id}/revision")
     def revision(session_id: UUID, db: DBSession = Depends(db_dep)):

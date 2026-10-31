@@ -72,6 +72,15 @@ class SessionNote(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=utcnow)
 
 
+class SessionPlan(SQLModel, table=True):
+    __tablename__ = "session_plan"
+
+    session_id: UUID = Field(foreign_key="study_session.id", ondelete="CASCADE", primary_key=True)
+    exam_date: Optional[str] = None  # ISO date YYYY-MM-DD
+    stage: str = "FULL"  # HALF_1, HALF_2, or FULL syllabus
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
 class SourceDocument(SQLModel, table=True):
     __tablename__ = "source_document"
 

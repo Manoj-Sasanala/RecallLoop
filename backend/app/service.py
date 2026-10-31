@@ -23,6 +23,7 @@ from app.models import (
     QuestionAttempt,
     RelationshipType,
     SessionNote,
+    SessionPlan,
     SourceDocument,
     StudySession,
     Topic,
@@ -439,6 +440,46 @@ def save_notes(db: Session, session: StudySession, notes_md: str) -> dict:
         "notes_md": note.notes_md,
         "updated_at": note.updated_at.isoformat(),
     }
+
+
+STAGES = ("HALF_1", "HALF_2", "FULL")
+
+
+def get_plan(db: Session, session: StudySession) -> dict:
+    plan = db.get(SessionPlan, session.id)
+    return {
+        "session_id": str(session.id),
+        "exam_date": plan.exam_date if plan else None,
+        "stage": plan.stage if plan else "FULL",
+    }
+
+
+def save_plan(db: Session, session: StudySession, exam_date: str | None, stage: str) -> dict:
+    if stage not in STAGES:
+        raise ValueError(f"stage must be one of {STAGES}")
+    if exam_date is not None and not _valid_date(exam_date):
+        raise ValueError("exam_date must be YYYY-MM-DD")
+    plan = db.get(SessionPlan, session.id)
+    if plan is None:
+        plan = SessionPlan(session_id=session.id, exam_date=exam_date, stage=stage)
+    else:
+        plan.exam_date = exam_date
+        plan.stage = stage
+        plan.updated_at = utcnow()
+    db.add(plan)
+    db.commit()
+    db.refresh(plan)
+    return get_plan(db, session)
+
+
+def _valid_date(value: str) -> bool:
+    from datetime import date as date_cls
+
+    try:
+        date_cls.fromisoformat(value)
+        return True
+    except ValueError:
+        return False
 
 
 def revision_plan(db: Session, session: StudySession) -> dict:

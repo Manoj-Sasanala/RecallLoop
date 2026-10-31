@@ -16,6 +16,12 @@ export type NotesPayload = {
   updated_at: string | null;
 };
 
+export type SessionPlan = {
+  session_id: string;
+  exam_date: string | null;
+  stage: string;
+};
+
 export type RevisionItem = {
   topic_id: string;
   title: string;

@@ -1,8 +1,20 @@
 import { useEffect, useState } from "react";
-import { getRevision, listSessions } from "../api";
+import { getPlan, getRevision, listSessions, savePlan } from "../api";
 import { DailyProgress } from "./DailyProgress";
 import { RevisionCalendar } from "./RevisionCalendar";
-import type { RevisionItem, SessionSummary } from "../types";
+import type { RevisionItem, SessionPlan, SessionSummary } from "../types";
+
+const STAGES = [
+  { value: "HALF_1", label: "First half" },
+  { value: "HALF_2", label: "Second half" },
+  { value: "FULL", label: "Full syllabus" },
+];
+
+function daysLeft(iso: string | null): number | null {
+  if (!iso) return null;
+  const ms = new Date(iso + "T00:00:00").getTime() - new Date().setHours(0, 0, 0, 0);
+  return Math.round(ms / 86400000);
+}
 
 function fmtDate(iso: string | null): string {
   if (!iso) return "—";
@@ -27,6 +39,7 @@ export function Home({
   const [sessions, setSessions] = useState<SessionSummary[] | null>(null);
   const [revise, setRevise] = useState<Record<string, string>>({});
   const [plans, setPlans] = useState<Record<string, RevisionItem[]>>({});
+  const [examPlans, setExamPlans] = useState<Record<string, SessionPlan>>({});
   const [tab, setTab] = useState<"sessions" | "planner" | "progress">("sessions");
   const [error, setError] = useState<string | null>(null);
 
@@ -37,12 +50,15 @@ export function Home({
         if (!live) return;
         setSessions(body.sessions);
         for (const s of body.sessions) {
+          getPlan(s.session_id)
+            .then((p) => live && setExamPlans((cur) => ({ ...cur, [s.session_id]: p })))
+            .catch(() => undefined);
           if (s.rounds === 0) continue;
-            getRevision(s.session_id)
-              .then((plan) => {
-                if (!live || plan.items.length === 0) return;
-                setPlans((cur) => ({ ...cur, [s.session_id]: plan.items }));
-                const next = plan.items[0];
+          getRevision(s.session_id)
+            .then((plan) => {
+              if (!live || plan.items.length === 0) return;
+              setPlans((cur) => ({ ...cur, [s.session_id]: plan.items }));
+              const next = plan.items[0];
               setRevise((cur) => ({
                 ...cur,
                 [s.session_id]: `Revise ${next.title} by ${fmtDate(next.review_on)}`,
@@ -139,6 +155,52 @@ export function Home({
                   <span>Started {fmtDate(s.created_at)}</span>
                   {s.weak_topics > 0 && <span className="badge weak">{s.weak_topics} weak</span>}
                   {revise[s.session_id] && <span className="badge warn">{revise[s.session_id]}</span>}
+                  {(() => {
+                    const left = daysLeft(examPlans[s.session_id]?.exam_date ?? null);
+                    if (left === null) return null;
+                    return (
+                      <span className={`badge ${left <= 7 ? "weak" : ""}`}>
+                        exam in {left}d
+                      </span>
+                    );
+                  })()}
+                </div>
+                <div className="row small" style={{ marginTop: 8 }}>
+                  <label>
+                    Exam{" "}
+                    <input
+                      type="date"
+                      value={examPlans[s.session_id]?.exam_date ?? ""}
+                      onChange={(e) => {
+                        const examDate = e.target.value || null;
+                        const stage = examPlans[s.session_id]?.stage ?? "FULL";
+                        savePlan(s.session_id, examDate, stage)
+                          .then((p) => setExamPlans((cur) => ({ ...cur, [s.session_id]: p })))
+                          .catch(() => undefined);
+                      }}
+                      style={{ font: "inherit", padding: "3px 6px" }}
+                    />
+                  </label>
+                  <label>
+                    Stage{" "}
+                    <select
+                      value={examPlans[s.session_id]?.stage ?? "FULL"}
+                      onChange={(e) => {
+                        const stage = e.target.value;
+                        const examDate = examPlans[s.session_id]?.exam_date ?? null;
+                        savePlan(s.session_id, examDate, stage)
+                          .then((p) => setExamPlans((cur) => ({ ...cur, [s.session_id]: p })))
+                          .catch(() => undefined);
+                      }}
+                      style={{ font: "inherit", padding: "3px 6px" }}
+                    >
+                      {STAGES.map((st) => (
+                        <option key={st.value} value={st.value}>
+                          {st.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                 </div>
                 <div className="row mt-16">
                   <button className="btn primary small" onClick={() => onOpen(s)}>

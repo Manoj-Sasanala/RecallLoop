@@ -200,6 +200,24 @@ def test_sessions_list_notes_and_revision(api):
 
     assert client.get("/api/v1/sessions/00000000-0000-0000-0000-000000000000/notes").status_code == 404
 
+    plan = client.get(f"/api/v1/sessions/{session_id}/plan")
+    assert plan.status_code == 200, plan.text
+    assert plan.json() == {"session_id": session_id, "exam_date": None, "stage": "FULL"}
+
+    saved_plan = client.put(
+        f"/api/v1/sessions/{session_id}/plan",
+        json={"exam_date": "2027-05-01", "stage": "HALF_1"},
+    )
+    assert saved_plan.status_code == 200, saved_plan.text
+    assert saved_plan.json()["exam_date"] == "2027-05-01"
+
+    bad_stage = client.put(f"/api/v1/sessions/{session_id}/plan", json={"stage": "NOPE"})
+    assert bad_stage.status_code == 400
+    bad_date = client.put(
+        f"/api/v1/sessions/{session_id}/plan", json={"exam_date": "tomorrow", "stage": "FULL"}
+    )
+    assert bad_date.status_code == 400
+
 
 def test_upload_reports_pages_and_tokens(api, tmp_path):
     client, _engine = api
