@@ -39,6 +39,7 @@ export function KnowledgeGraph({
   const panStart = useRef<{ mouseX: number; mouseY: number; startX: number; startY: number } | null>(null);
 
   const containerRef = useRef<SVGSVGElement | null>(null);
+  const viewportRef = useRef<HTMLDivElement | null>(null);
   const animFrameRef = useRef<number | null>(null);
 
   const byId = useMemo(() => new Map(topics.map((t) => [t.topic_id, t])), [topics]);
@@ -212,6 +213,34 @@ export function KnowledgeGraph({
     setDraggingNode(topicId);
   };
 
+  // Mouse-wheel zoom toward the cursor (native listener: React wheel is passive)
+  useEffect(() => {
+    const el = viewportRef.current;
+    if (!el) return;
+    const VBW = 680;
+    const VBH = 340;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const svg = containerRef.current;
+      if (!svg) return;
+      const rect = svg.getBoundingClientRect();
+      if (rect.width === 0) return;
+      const sx = ((e.clientX - rect.left) / rect.width) * VBW;
+      const sy = ((e.clientY - rect.top) / rect.height) * VBH;
+      setTransform((t) => {
+        const k2 = Math.max(0.5, Math.min(2.2, t.k * (e.deltaY < 0 ? 1.12 : 1 / 1.12)));
+        if (k2 === t.k) return t;
+        return {
+          k: k2,
+          x: sx - ((sx - t.x) / t.k) * k2,
+          y: sy - ((sy - t.y) / t.k) * k2,
+        };
+      });
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
+
   const handleMouseMove = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
       if (draggingNode) {
@@ -327,6 +356,7 @@ export function KnowledgeGraph({
       </div>
 
       <div
+        ref={viewportRef}
         className="obsidian-graph-viewport"
         style={{
           width: "100%",
@@ -543,7 +573,7 @@ export function KnowledgeGraph({
           <span className="dot" style={{ background: "var(--warn)", marginLeft: 8 }} /> Fragile
           <span className="dot" style={{ background: "var(--danger)", marginLeft: 8 }} /> Flagged Weak
           <span className="small muted" style={{ marginLeft: 12 }}>
-            Drag to rearrange &middot; Click to inspect backlinks
+            Drag to rearrange &middot; Scroll to zoom &middot; Click to inspect backlinks
           </span>
         </div>
       </div>
