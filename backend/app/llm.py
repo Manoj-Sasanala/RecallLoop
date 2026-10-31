@@ -77,7 +77,7 @@ class OpenAICompatClient:
         api_key: str,
         base_url: str,
         model: str,
-        timeout: float = 25.0,
+        timeout: float = 120.0,
         supports_developer_role: bool = False,
         supports_response_chaining: bool = False,
         vision: bool = False,
