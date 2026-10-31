@@ -124,6 +124,7 @@ export type RemediationCard = {
   source_page: number;
   corrective_explanation_md: string;
   worked_example_md: string;
+  page_image_b64?: string | null;
 };
 
 export type RemediationPlan = {

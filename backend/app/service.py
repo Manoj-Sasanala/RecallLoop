@@ -554,6 +554,14 @@ def remediation_cards(db: Session, attempt: ExamAttempt, topic_ids: list[UUID]) 
             continue
         item_attempt, question = chosen
         correct = next(o for o in question.options_json if o["option_id"] == question.correct_option_id)
+        page_row = db.exec(
+            select(DocumentPage)
+            .where(
+                DocumentPage.document_id == question.source_doc_id,
+                DocumentPage.page_number == question.source_page_number,
+            )
+            .limit(1)
+        ).first()
         worked = (
             f"Worked example: apply the rule from page {question.source_page_number} "
             f"to a new case and explain why the other three options fail."
@@ -579,6 +587,7 @@ def remediation_cards(db: Session, attempt: ExamAttempt, topic_ids: list[UUID]) 
                     f"The correct answer is **{correct['text']}**."
                 ),
                 "worked_example_md": worked,
+                "page_image_b64": page_row.page_image_b64 if page_row else None,
             }
         )
     return cards

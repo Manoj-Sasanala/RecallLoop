@@ -180,6 +180,13 @@ export function Remediation({
               {/* Block 2: Source Quote & Ground Truth Reference */}
               <div className="notion-quote-block">
                 <div className="quote-text">&ldquo;{card.source_truth_quote}&rdquo;</div>
+                {card.page_image_b64 && (
+                  <img
+                    src={`data:image/png;base64,${card.page_image_b64}`}
+                    alt={`Source diagram from page ${card.source_page}`}
+                    style={{ maxWidth: "100%", border: "1px solid var(--line)", borderRadius: "var(--radius)", marginTop: 8 }}
+                  />
+                )}
                 <div className="quote-meta">
                   <span className="source-tag">Verbatim Ground Truth</span>
                   <button
@@ -260,17 +267,29 @@ export function Remediation({
         })}
       </div>
 
-      {/* Retest Action Bar */}
+      {/* Retest Action Bar — Close-and-Recall gate: prove recall before retesting */}
       <div className="panel mt-16">
         <div className="row" style={{ alignItems: "center" }}>
           <div>
             <h2>Prove it on new questions.</h2>
             <p className="small muted" style={{ marginTop: 4 }}>
               {plan.retest_questions.length} targeted items on the flagged topics. Same underlying rules, unfamiliar stems.
+              {completedChecks < totalChecks && (
+                <>
+                  {" "}
+                  Check both boxes on every card above ({completedChecks}/{totalChecks} done) to unlock the retest —
+                  recall first, then prove it.
+                </>
+              )}
             </p>
           </div>
           <span className="spacer" />
-          <button className="btn primary" onClick={onRetest} disabled={busy}>
+          <button
+            className="btn primary"
+            onClick={onRetest}
+            disabled={busy || completedChecks < totalChecks}
+            title={completedChecks < totalChecks ? "Complete the self-checks above first" : undefined}
+          >
             {busy ? "Preparing retest..." : "Start targeted retest"}
           </button>
         </div>

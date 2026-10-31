@@ -95,6 +95,7 @@ def test_demo_bundle_full_loop(api):
     assert plan["remediation_cards"], plan
     assert plan["remediation_cards"][0]["source_truth_quote"]
     assert plan["remediation_cards"][0]["trapped_misconception"]
+    assert "page_image_b64" in plan["remediation_cards"][0]
     retest_id = plan["retest_exam_attempt_id"]
     assert len(plan["retest_questions"]) == 2
 

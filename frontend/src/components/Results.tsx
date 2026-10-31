@@ -440,11 +440,24 @@ export function Results({
                   </button>
                 </div>
                 <div className="review-answer">
-                  Your answer: <span className={item.is_correct ? "right" : "wrong"}>{chosen}</span>
+                  Your answer:{" "}
+                  {item.is_correct ? (
+                    <span className="right">{chosen}</span>
+                  ) : (
+                    <span className="wrong">
+                      <s>{chosen}</s>
+                    </span>
+                  )}
                   {!item.is_correct && (
                     <>
                       {" "}
                       &middot; Correct: <span className="right">{right}</span>
+                      {item.endorsed_misconception && (
+                        <div className="small" style={{ marginTop: 4, color: "var(--danger)" }}>
+                          Struck because it tests the <span className="mono">{item.endorsed_misconception}</span> trap —
+                          the source quote below says otherwise.
+                        </div>
+                      )}
                     </>
                   )}
                 </div>
