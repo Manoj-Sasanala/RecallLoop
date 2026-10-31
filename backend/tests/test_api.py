@@ -12,7 +12,7 @@ from sqlmodel import Session, select
 from app.api import create_app
 from app.db import make_engine
 from app.llm import FakeClient
-from app.models import Question, Topic
+from app.models import Question, SourceDocument, Topic
 
 
 def _parse_sse(text: str) -> dict[str, dict]:
@@ -162,6 +162,12 @@ def test_blueprint_contract_and_session_purge(api):
     deleted = client.delete(f"/api/v1/sessions/{session_id}")
     assert deleted.status_code == 204, deleted.text
     assert client.get(f"/api/v1/sessions/{session_id}").status_code == 404
+
+    with Session(_engine) as db:
+        orphans = db.exec(
+            select(SourceDocument).where(SourceDocument.session_id == UUID(session_id))
+        ).all()
+        assert orphans == []
 
 
 def test_upload_reports_pages_and_tokens(api, tmp_path):
