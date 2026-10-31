@@ -18,6 +18,7 @@ node_modules/
 
 # frontend build
 dist/
+*.tsbuildinfo
 
 # internal spec doc (not part of the submission)
 RecallLoop Architecture and PRD.md
