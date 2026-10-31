@@ -14,8 +14,10 @@ export type Topic = {
   code: string;
   title: string;
   syllabus_weight: number;
+  allocated_questions: number;
   out_degree: number;
   page_refs: { doc_id: string; start_page: number; end_page: number }[];
+  prerequisites: string[];
 };
 
 export type Option = { option_id: string; text: string };

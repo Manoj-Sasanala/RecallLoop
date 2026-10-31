@@ -1,5 +1,7 @@
 import type { Topic } from "../types";
 
+import { TopicGraph } from "./TopicGraph";
+
 export function Blueprint({
   topics,
   busy,
@@ -65,6 +67,14 @@ export function Blueprint({
             {totalQuestions} questions &middot; 10 minutes &middot; confidence recorded per item
           </span>
         </div>
+      </section>
+
+      <section className="panel mt-16" aria-labelledby="graph-heading">
+        <div className="panel-head">
+          <h2 id="graph-heading">Dependency graph</h2>
+          <span className="hint">prerequisites point left to right</span>
+        </div>
+        <TopicGraph topics={topics} />
       </section>
     </>
   );
