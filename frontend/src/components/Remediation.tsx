@@ -22,6 +22,7 @@ export function Remediation({
   busy: boolean;
   onRetest: () => void;
 }) {
+  const lures = plan.remediation_cards.filter((c) => c.trapped_misconception).length;
   return (
     <>
       <header className="page-head">
@@ -35,7 +36,33 @@ export function Remediation({
         </div>
       </header>
 
-      <div className="card-stack">
+      <section className="panel" aria-labelledby="briefing-heading">
+        <div className="panel-head">
+          <h2 id="briefing-heading">Your briefing</h2>
+          <span className="hint">read this first, then study the cards</span>
+        </div>
+        <p className="lede" style={{ maxWidth: "70ch" }}>
+          {plan.remediation_cards.length} weak topic{plan.remediation_cards.length === 1 ? "" : "s"}
+          {lures > 0 ? (
+            <>
+              {" "}— {lures} confident wrong answer{lures === 1 ? "" : "s"}, meaning {lures === 1 ? "a" : ""} misconception{lures === 1 ? "" : "s"} to unlearn, not just gaps to fill.{" "}
+            </>
+          ) : (
+            "— no confident errors, so this is fill-in work, not unlearning. "
+          )}
+          Start with <strong>{plan.remediation_cards[0]?.topic_title}</strong>
+          {plan.remediation_cards[0]?.trapped_misconception ? (
+            <>
+              {" "}(the <span className="mono">{plan.remediation_cards[0].trapped_misconception}</span> trap)
+            </>
+          ) : (
+            ""
+          )}
+          , then prove it on {plan.retest_questions.length} new questions.
+        </p>
+      </section>
+
+      <div className="card-stack mt-16">
         {plan.remediation_cards.map((card) => (
           <article className="rem-card" key={card.topic_id}>
             <div className="rem-head">
