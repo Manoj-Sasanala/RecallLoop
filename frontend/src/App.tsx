@@ -441,6 +441,9 @@ export default function App() {
     return {
       view,
       sessionTitle: session?.title ?? null,
+      hasTopics: topics.length > 0,
+      hasExam: exam !== null,
+      hasGrade: grade !== null,
       rounds,
       lastMastery,
       weakTopics: weakFallback,

@@ -9,6 +9,9 @@ export type AssistantTopicRef = { id: string; title: string; code?: string; summ
 export type AssistantContext = {
   view: string;
   sessionTitle: string | null;
+  hasTopics: boolean;
+  hasExam: boolean;
+  hasGrade: boolean;
   rounds: number;
   lastMastery: number | null;
   weakTopics: { title: string; reviewOn?: string }[];
@@ -97,8 +100,20 @@ function handleCommand(query: string, ctx: AssistantContext, actions: AssistantA
     return { reply: "Taking you home.", action: actions.goHome };
   }
 
+  const noteMatch = q.match(/(?:note\s+down|take\s+a\s+note|add\s+note|save\s+note|dictate\s+note)\s*[:\-]?\s*(.+)/);
+  if (noteMatch) {
+    if (!ctx.sessionTitle) return { reply: "Open a session first, then I will attach notes to it." };
+    const noteText = noteMatch[1].trim();
+    if (!noteText) return { reply: "What should I note down?" };
+    return {
+      reply: `Noted: "${noteText}".`,
+      action: () => actions.appendNote(noteText),
+    };
+  }
+
   // --- Notion-style Mastery Board / Kanban ---
   if (/\b(mastery\s+board|kanban|board\s+view|notion\s+board|cards?\s+board)\b/.test(q) || (/\bboard\b/.test(q) && !/\b(home|session)\b/.test(q))) {
+    if (!ctx.hasGrade) return { reply: "Open a session and finish an exam first — then I will open your Mastery Board." };
     return {
       reply: "Opening the Notion-style Mastery Progression Board.",
       action: () => {
@@ -110,6 +125,7 @@ function handleCommand(query: string, ctx: AssistantContext, actions: AssistantA
 
   // --- Obsidian-style Knowledge Graph ---
   if (/\b(knowledge\s+graph|obsidian|graph|network|concept\s+map|visualize)\b/.test(q)) {
+    if (!ctx.hasTopics) return { reply: "Open a session first, then I will show its Knowledge Graph." };
     return {
       reply: "Opening the Knowledge Mastery Network Graph.",
       action: () => {
@@ -124,6 +140,7 @@ function handleCommand(query: string, ctx: AssistantContext, actions: AssistantA
 
   // --- Diagnostic Matrix / Results ---
   if (/\b(matrix|diagnosis|results|table\s+view|score|accuracy)\b/.test(q)) {
+    if (!ctx.hasGrade) return { reply: "Finish an exam first — then I will open your diagnostic matrix." };
     return {
       reply: "Opening your diagnostic matrix and results.",
       action: () => {
@@ -135,6 +152,7 @@ function handleCommand(query: string, ctx: AssistantContext, actions: AssistantA
 
   // --- Remediation / Misconception Cards ---
   if (/\b(remediat|unlearn|cards|study\s+cards?|remediation\s+plan)\b/.test(q)) {
+    if (!ctx.hasGrade) return { reply: "Finish an exam first — remediation is built from your graded answers." };
     return {
       reply: "Taking you to interactive block remediation.",
       action: () => {
@@ -146,6 +164,7 @@ function handleCommand(query: string, ctx: AssistantContext, actions: AssistantA
 
   // --- Exam / Test ---
   if (/\b(start|take|generate|begin)\s+(an?\s+)?(exam|test|quiz)\b/.test(q) || q === "start exam" || q === "take exam") {
+    if (!ctx.sessionTitle) return { reply: "Open a session first, then I will start its exam." };
     return {
       reply: "Starting your exam session.",
       action: () => {
@@ -157,6 +176,7 @@ function handleCommand(query: string, ctx: AssistantContext, actions: AssistantA
 
   // --- Blueprint / Syllabus ---
   if (/\b(blueprint|syllabus|course\s+map)\b/.test(q)) {
+    if (!ctx.hasTopics) return { reply: "Open a session first, then I will show its blueprint." };
     return {
       reply: "Opening the course blueprint.",
       action: () => actions.navigateView?.("blueprint"),
@@ -174,17 +194,6 @@ function handleCommand(query: string, ctx: AssistantContext, actions: AssistantA
   if (/\bnotes?\b/.test(q) && /\b(open|show|write)\b/.test(q)) {
     if (!ctx.sessionTitle) return { reply: "Open a session first, then I will take you to its notes." };
     return { reply: "Opening your notes.", action: actions.openNotes };
-  }
-
-  const noteMatch = q.match(/(?:note\s+down|take\s+a\s+note|add\s+note|save\s+note|dictate\s+note)\s*[:\-]?\s*(.+)/);
-  if (noteMatch) {
-    if (!ctx.sessionTitle) return { reply: "Open a session first, then I will attach notes to it." };
-    const noteText = noteMatch[1].trim();
-    if (!noteText) return { reply: "What should I note down?" };
-    return {
-      reply: `Noted: "${noteText}".`,
-      action: () => actions.appendNote(noteText),
-    };
   }
 
   const deleteMatch = q.match(/(?:delete|purge|remove|clear)\s+(.+)/);
@@ -295,6 +304,7 @@ export function Assistant({
     { who: "jarvis", text: "Systems online. Ask, dictate, or go live — I can also open and organize for you." },
   ]);
   const stopRef = useRef<(() => void) | null>(null);
+  const lastEmptyNoticeRef = useRef(0);
   const liveRef = useRef(false);
   const speakingRef = useRef(false);
   const lastSpokenRef = useRef("");
@@ -410,7 +420,18 @@ export function Assistant({
     setWorking(true);
     const text = await transcribe(blob);
     setWorking(false);
-    if (!text) return;
+    if (!text) {
+      // Mic captured sound but no words came out — say so instead of silence.
+      const now = Date.now();
+      if (now - (lastEmptyNoticeRef.current || 0) > 10000) {
+        lastEmptyNoticeRef.current = now;
+        setLog((cur) => [
+          ...cur,
+          { who: "jarvis", text: "I heard sound but no words — speak up a little, closer to the mic." },
+        ]);
+      }
+      return;
+    }
     if (mode === "dictate") {
       setInput((cur) => (cur ? `${cur} ${text}` : text));
       return;

@@ -559,7 +559,12 @@ def transcribe_audio(data: bytes, filename: str = "audio.webm", prompt: str | No
         if pcm.size == 0:
             return {"text": "", "language": "en", "duration_s": 0.0}
         
-        transcribe_kwargs = {"language": "en", "beam_size": 1, "vad_filter": True}
+        transcribe_kwargs = {
+            "language": "en",
+            "beam_size": 1,
+            "vad_filter": True,
+            "vad_parameters": {"threshold": 0.3, "min_speech_duration_ms": 200},
+        }
         if prompt and prompt.strip():
             transcribe_kwargs["initial_prompt"] = prompt.strip()
 
