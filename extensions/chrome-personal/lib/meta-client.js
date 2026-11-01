@@ -32,7 +32,7 @@ export async function chatAction({ baseUrl, key, model, messages, fetchImpl }) {
   const res = await fetchFn(String(baseUrl).replace(/\/$/, '') + '/chat/completions', {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: 'Bearer ' + key },
-    body: JSON.stringify({ model, messages, temperature: 0.2, max_tokens: 800 }),
+    body: JSON.stringify({ model, messages, temperature: 0.2, max_tokens: 4096 }),
     signal: AbortSignal.timeout(120000),
   });
   if (!res.ok) throw new Error('Meta API error: ' + res.status);

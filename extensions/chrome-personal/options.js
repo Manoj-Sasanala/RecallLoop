@@ -1,5 +1,5 @@
-// shortcut: default model/base are guesses, user overrides in options page.
-const DEFAULTS = { baseUrl: 'https://api.llama.com/compat/v1', metaModel: '' };
+// Defaults verified live against the Meta Model API (models list + chat completion).
+const DEFAULTS = { baseUrl: 'https://api.meta.ai/v1', metaModel: 'muse-spark-1.3' };
 
 export async function GET_OPTIONS() {
   const s = await chrome.storage.local.get(['metaApiKey', 'metaModel', 'baseUrl']);

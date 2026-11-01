@@ -29,6 +29,13 @@ test('chatAction surfaces unknown tool instead of silent stop', async () => {
   await assert.rejects(() => chatAction({ baseUrl: 'https://x', key: 'k', model: 'm', messages: [], fetchImpl: stub }), /unknown action/);
 });
 
+test('chatAction requests a budget that fits reasoning models', async () => {
+  let body = null;
+  const stub = async (url, init) => { body = JSON.parse(init.body); return { ok: true, json: async () => ({ choices: [{ message: { content: '{"tool":"stop"}' } }] }) }; };
+  await chatAction({ baseUrl: 'https://x', key: 'k', model: 'm', messages: [], fetchImpl: stub });
+  assert.ok(body.max_tokens >= 2048, 'max_tokens=' + body.max_tokens);
+});
+
 test('chatAction returns parsed action from stubbed fetch', async () => {
   const stub = async () => ({ ok: true, json: async () => ({ choices: [{ message: { content: '{"tool":"stop","note":"done"}' } }] }) });
   const r = await chatAction({ baseUrl: 'https://x', key: 'k', model: 'm', messages: [{ role: 'user', content: 'hi' }], fetchImpl: stub });

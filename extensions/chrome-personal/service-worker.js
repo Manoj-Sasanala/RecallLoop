@@ -2,7 +2,7 @@ import { chatAction } from './lib/meta-client.js';
 import { validateAction, needsConfirm, isSystemPage } from './lib/actions.js';
 
 const MAX_STEPS = 15;
-const DEFAULT_BASE = 'https://api.llama.com/compat/v1';
+const DEFAULT_BASE = 'https://api.meta.ai/v1';
 let running = false;
 let stopRequested = false;
 
