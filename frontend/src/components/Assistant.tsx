@@ -18,6 +18,7 @@ export type AssistantActions = {
   openSession: (id: string) => void;
   openNotes: () => void;
   purgeCurrent: () => void;
+  purgeSession: (id: string, title: string) => void;
 };
 
 declare global {
@@ -49,18 +50,50 @@ type SpeechRecognitionInstance = {
 type CommandResult = { reply: string; action?: () => void };
 
 function findSession(ctx: AssistantContext, query: string): AssistantSessionRef | null {
-  const q = query.toLowerCase();
-  const scored = ctx.sessions
+  const FILLER = /^(hey|hi|hello|okay|please|jarvis|can you|could you|would you|will you|kindly|i want you to|i want to|now)\b[, ]*/;
+  const NOISE = /\b(please|kindly|her|him|it|this|that|the|a|an|my|session|thing|stuff|for me|me)\b/g;
+  const COMMAND_WORDS = /^(open|show|load|delete|purge|remove|clear|start|quiz|exam|go|take)$/;
+  const words = query
+    .toLowerCase()
+    .replace(/[?,.!"']/g, " ")
+    .replace(FILLER, "")
+    .replace(NOISE, " ")
+    .split(/[^a-z0-9]+/)
+    .filter((w) => w.length > 1 && !COMMAND_WORDS.test(w));
+  if (words.length === 0) return null;
+  const wordHit = (a: string, b: string): boolean => {
+    if (a === b) return true;
+    const n = Math.min(5, a.length, b.length);
+    return n >= 4 && a.slice(0, n) === b.slice(0, n);
+  };
+  const ranked = ctx.sessions
     .map((s) => {
-      const title = s.title.toLowerCase();
-      if (title === q) return { s, score: 3 };
-      if (title.includes(q)) return { s, score: 2 };
-      if (q.split(/\s+/).some((w) => w.length > 3 && title.includes(w))) return { s, score: 1 };
-      return { s, score: 0 };
+      const titleWords = s.title.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+      let score = 0;
+      for (const w of words) {
+        if (w.length < 3) continue;
+        if (titleWords.some((t) => wordHit(w, t))) score += w.length >= 6 ? 2 : 1;
+      }
+      return { s, score };
     })
     .filter((r) => r.score > 0)
     .sort((a, b) => b.score - a.score);
-  return scored.length > 0 ? scored[0].s : null;
+  return ranked.length > 0 ? ranked[0].s : null;
+}
+
+function uniqueTitles(sessions: AssistantSessionRef[], limit = 4): string {  const titles = [...new Set(sessions.map((s) => s.title))];
+  const shown = titles.slice(0, limit).join("; ");
+  return titles.length > limit ? `${shown}; and ${titles.length - limit} more` : shown;
+}
+
+function hasTargetWords(text: string): boolean {
+  const words = text
+    .toLowerCase()
+    .replace(/[?,.!"']/g, " ")
+    .replace(/\b(please|kindly|her|him|it|this|that|the|a|an|my|session|thing|stuff|for me|me|delete|purge|remove|clear|open|show|load)\b/g, " ")
+    .split(/[^a-z0-9]+/)
+    .filter((w) => w.length > 2);
+  return words.length > 0;
 }
 
 function handleCommand(query: string, ctx: AssistantContext, actions: AssistantActions): CommandResult {
@@ -74,13 +107,22 @@ function handleCommand(query: string, ctx: AssistantContext, actions: AssistantA
   if (openMatch) {
     const target = findSession(ctx, openMatch[1]);
     if (target) return { reply: `Opening ${target.title}.`, action: () => actions.openSession(target.id) };
-    return { reply: `I cannot find a session called "${openMatch[1]}". Your sessions: ${ctx.sessions.map((s) => s.title).join("; ") || "none yet"}.` };
+    return { reply: `I cannot find that. Your sessions: ${uniqueTitles(ctx.sessions) || "none yet"}.` };
   }
   if (/\bnotes?\b/.test(q) && /\b(open|show|write)\b/.test(q)) {
     if (!ctx.sessionTitle) return { reply: "Open a session first, then I will take you to its notes." };
     return { reply: "Opening your notes.", action: actions.openNotes };
   }
-  if (/\b(delete|purge|remove).*(session|it|this)\b/.test(q)) {
+  const deleteMatch = q.match(/(?:delete|purge|remove|clear)\s+(.+)/);
+  if (deleteMatch || /\b(delete|purge|remove|clear)\b/.test(q)) {
+    // A named target wins over the open session — never delete the wrong one.
+    const named = deleteMatch ? findSession(ctx, deleteMatch[1]) : null;
+    if (named) {
+      return { reply: `Deleting "${named.title}" after your confirmation.`, action: () => actions.purgeSession(named.id, named.title) };
+    }
+    if (deleteMatch && hasTargetWords(deleteMatch[1])) {
+      return { reply: `I cannot find that. Your sessions: ${uniqueTitles(ctx.sessions) || "none yet"}.` };
+    }
     if (!ctx.sessionTitle) return { reply: "There is no open session to delete." };
     return { reply: `Deleting "${ctx.sessionTitle}" after your confirmation.`, action: actions.purgeCurrent };
   }

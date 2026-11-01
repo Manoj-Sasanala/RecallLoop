@@ -254,6 +254,9 @@ export default function App() {
         reset();
       });
     },
+    purgeSession: (id: string, title: string) => {
+      purgeSummary({ session_id: id, title } as SessionSummary);
+    },
   };
 
   const assistantCtx = useMemo(assistantContext, [session, grade, delta, assistantPlan, assistantRevision, assistantDelta, assistantSessions, view]);
