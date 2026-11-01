@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { recordOnce, requestMic, startLoop } from "../recorder";
+import { recordOnce, requestMic, startLoop, micSupport } from "../recorder";
 import { transcribeAudio } from "../api";
 
 export type AssistantSessionRef = { id: string; title: string };
@@ -153,6 +153,7 @@ export function Assistant({
   const [listening, setListening] = useState(false);
   const [speaking, setSpeaking] = useState(false);
   const [working, setWorking] = useState(false);
+  const [micLevel, setMicLevel] = useState(0);
   const [log, setLog] = useState<{ who: "you" | "jarvis"; text: string }[]>([
     { who: "jarvis", text: "Systems online. Ask, dictate, or go live — I can also open and organize for you." },
   ]);
@@ -195,6 +196,7 @@ export function Assistant({
     setListening(false);
     setSpeaking(false);
     setWorking(false);
+    setMicLevel(0);
   };
 
   const speak = (text: string) => {
@@ -278,10 +280,16 @@ export function Assistant({
       setListening(false);
       return;
     }
+    const support = micSupport();
+    if (!support.ok) {
+      setLog((cur) => [...cur, { who: "jarvis", text: support.reason }]);
+      return;
+    }
     liveRef.current = false;
     try {
       stopRef.current = await recordOnce({
         onSegment: ({ blob }) => void handleSegment(blob, "dictate"),
+        onLevel: (v) => setMicLevel(Math.min(1, v * 4)),
         onError: (message) =>
           setLog((cur) => [...cur, { who: "jarvis", text: message }]),
       });
@@ -310,10 +318,12 @@ export function Assistant({
       speakingRef.current = false;
       setListening(false);
       setSpeaking(false);
+      setMicLevel(0);
       return;
     }
-    if (!navigator.mediaDevices?.getUserMedia) {
-      setLog((cur) => [...cur, { who: "jarvis", text: "Voice input is not supported in this browser. Type instead." }]);
+    const support = micSupport();
+    if (!support.ok) {
+      setLog((cur) => [...cur, { who: "jarvis", text: support.reason }]);
       return;
     }
     const stream = await requestMic();
@@ -325,9 +335,12 @@ export function Assistant({
     try {
       stopRef.current = await startLoop(stream, {
         onSegment: ({ blob }) => void handleSegment(blob, "live"),
-        onError: () => {
+        onLevel: (v) => setMicLevel(Math.min(1, v * 4)),
+        onError: (message) => {
           liveRef.current = false;
           setListening(false);
+          setMicLevel(0);
+          setLog((cur) => [...cur, { who: "jarvis", text: message }]);
         },
       });
       setListening(true);
@@ -379,6 +392,31 @@ export function Assistant({
             <div ref={bottomRef} />
           </div>
           <div className="row">
+            <div
+              aria-hidden="true"
+              title="Microphone level"
+              style={{
+                flex: "0 0 8px",
+                height: 34,
+                border: "1px solid var(--line)",
+                borderRadius: 4,
+                background: "var(--paper)",
+                position: "relative",
+                overflow: "hidden",
+              }}
+            >
+              <div
+                style={{
+                  position: "absolute",
+                  bottom: 0,
+                  left: 0,
+                  right: 0,
+                  height: `${Math.round(micLevel * 100)}%`,
+                  background: listening ? "var(--accent)" : "var(--line)",
+                  transition: "height 120ms",
+                }}
+              />
+            </div>
             <input
               value={input}
               onChange={(e) => setInput(e.target.value)}

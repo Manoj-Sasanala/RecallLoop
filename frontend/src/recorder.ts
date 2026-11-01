@@ -17,10 +17,29 @@ const SILENCE_MS = 1500;
 const MIN_SPEECH_MS = 800;
 const MAX_SEGMENT_MS = 30000;
 
+function micErrorMessage(err: unknown): string {
+  const name = err instanceof DOMException ? err.name : "";
+  if (typeof window !== "undefined" && window.isSecureContext === false) {
+    return "Microphone needs localhost or HTTPS — this page is plain HTTP, so the browser blocks the mic.";
+  }
+  if (name === "NotAllowedError" || name === "SecurityError") {
+    return "Microphone blocked — allow access in the browser address bar, then tap again.";
+  }
+  if (name === "NotFoundError" || name === "OverconstrainedError") {
+    return "No microphone found — connect one, or type instead.";
+  }
+  if (name === "NotReadableError") {
+    return "Microphone is busy in another app — close it and try again.";
+  }
+  return "Microphone unavailable — allow access and try again.";
+}
+
 export async function recordOnce(handlers: Pick<Handlers, "onSegment" | "onError" | "onLevel">): Promise<() => void> {
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: true }).catch(() => null);
-  if (!stream) {
-    handlers.onError?.("Microphone blocked — allow access and try again.");
+  let stream: MediaStream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (err) {
+    handlers.onError?.(micErrorMessage(err));
     return () => undefined;
   }
   return startLoop(stream, { ...handlers, single: true });
@@ -152,4 +171,17 @@ export async function requestMic(): Promise<MediaStream | null> {
   } catch {
     return null;
   }
+}
+
+export function micSupport(): { ok: boolean; reason: string } {
+  if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+    return { ok: false, reason: "Voice input is not supported in this browser. Type instead." };
+  }
+  if (typeof window !== "undefined" && window.isSecureContext === false) {
+    return {
+      ok: false,
+      reason: "Microphone needs localhost or HTTPS — this page is plain HTTP, so the browser blocks the mic.",
+    };
+  }
+  return { ok: true, reason: "" };
 }
