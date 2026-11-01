@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "Personal Meta Agent (for me only)",
+  "version": "0.1.0",
+  "description": "Personal side-panel browser agent using your Meta API key. Unpacked, local-only.",
+  "minimum_chrome_version": "116",
+  "action": { "default_title": "Open Personal Agent" },
+  "side_panel": { "default_path": "sidepanel.html" },
+  "background": { "service_worker": "service-worker.js", "type": "module" },
+  "options_page": "options.html",
+  "permissions": ["sidePanel", "storage", "activeTab", "scripting", "tabs", "alarms", "notifications", "offscreen"],
+  "host_permissions": [],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' https://api.llama.com https://api.meta.com"
+  }
+}
