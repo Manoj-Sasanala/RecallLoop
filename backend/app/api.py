@@ -149,13 +149,13 @@ def create_app(engine=None, client=None) -> FastAPI:
         return service.revision_plan(db, service.get_session(db, session_id))
 
     @app.post("/api/v1/speech/transcribe", status_code=200)
-    async def transcribe_speech(audio: UploadFile = File(...)):
+    async def transcribe_speech(audio: UploadFile = File(...), prompt: str | None = Form(None)):
         data = await audio.read()
         if not data:
             raise ValueError("empty audio upload")
         if len(data) > 10 * 1024 * 1024:
             raise ValueError("audio exceeds 10 MB; send shorter clips")
-        return service.transcribe_audio(data, audio.filename or "audio.webm")
+        return service.transcribe_audio(data, audio.filename or "audio.webm", prompt=prompt)
 
     @app.post("/api/v1/sessions/{session_id}/documents", status_code=201)
     async def upload_documents(

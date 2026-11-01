@@ -4,6 +4,8 @@ import { transcribeAudio } from "../api";
 
 export type AssistantSessionRef = { id: string; title: string };
 
+export type AssistantTopicRef = { id: string; title: string; code?: string; summary?: string };
+
 export type AssistantContext = {
   view: string;
   sessionTitle: string | null;
@@ -13,6 +15,7 @@ export type AssistantContext = {
   reviseNext: string | null;
   examCountdown: string | null;
   sessions: AssistantSessionRef[] | null;
+  topics?: AssistantTopicRef[];
 };
 
 export type AssistantActions = {
@@ -21,6 +24,11 @@ export type AssistantActions = {
   openNotes: () => void;
   purgeCurrent: () => void;
   purgeSession: (id: string, title: string) => void;
+  appendNote: (text: string) => void;
+  navigateView?: (view: string) => void;
+  setResultsTab?: (tab: "diagnosis" | "board" | "graph") => void;
+  startExam?: () => void;
+  startRemediation?: () => void;
 };
 
 type CommandResult = { reply: string; action?: () => void };
@@ -77,10 +85,84 @@ function hasTargetWords(text: string): boolean {
 function handleCommand(query: string, ctx: AssistantContext, actions: AssistantActions): CommandResult {
   const q = query.toLowerCase().trim();
 
+  // --- Greetings & Conversational Openers ---
+  if (/^(hi|hello|hey|greetings|good\s+(morning|afternoon|evening)|yo)\b/.test(q)) {
+    return {
+      reply: "Hello! I am online. Ask me to open the Mastery Board, view the Knowledge Graph, check weak topics, or take an exam.",
+    };
+  }
+
   // --- Actions: the agent operates the app ---
   if (/\b(go\s+)?home\b/.test(q) || q === "home" || /\b(all sessions|all my sessions|main page|main screen|back to (all )?sessions|go back|home screen|session list)\b/.test(q)) {
     return { reply: "Taking you home.", action: actions.goHome };
   }
+
+  // --- Notion-style Mastery Board / Kanban ---
+  if (/\b(mastery\s+board|kanban|board\s+view|notion\s+board|cards?\s+board)\b/.test(q) || (/\bboard\b/.test(q) && !/\b(home|session)\b/.test(q))) {
+    return {
+      reply: "Opening the Notion-style Mastery Progression Board.",
+      action: () => {
+        actions.setResultsTab?.("board");
+        actions.navigateView?.("results");
+      },
+    };
+  }
+
+  // --- Obsidian-style Knowledge Graph ---
+  if (/\b(knowledge\s+graph|obsidian|graph|network|concept\s+map|visualize)\b/.test(q)) {
+    return {
+      reply: "Opening the Knowledge Mastery Network Graph.",
+      action: () => {
+        if (ctx.view === "results") {
+          actions.setResultsTab?.("graph");
+        } else {
+          actions.navigateView?.("blueprint");
+        }
+      },
+    };
+  }
+
+  // --- Diagnostic Matrix / Results ---
+  if (/\b(matrix|diagnosis|results|table\s+view|score|accuracy)\b/.test(q)) {
+    return {
+      reply: "Opening your diagnostic matrix and results.",
+      action: () => {
+        actions.setResultsTab?.("diagnosis");
+        actions.navigateView?.("results");
+      },
+    };
+  }
+
+  // --- Remediation / Misconception Cards ---
+  if (/\b(remediat|unlearn|cards|study\s+cards?|remediation\s+plan)\b/.test(q)) {
+    return {
+      reply: "Taking you to interactive block remediation.",
+      action: () => {
+        actions.startRemediation?.();
+        actions.navigateView?.("remediation");
+      },
+    };
+  }
+
+  // --- Exam / Test ---
+  if (/\b(start|take|generate|begin)\s+(an?\s+)?(exam|test|quiz)\b/.test(q) || q === "start exam" || q === "take exam") {
+    return {
+      reply: "Starting your exam session.",
+      action: () => {
+        actions.startExam?.();
+        actions.navigateView?.("exam");
+      },
+    };
+  }
+
+  // --- Blueprint / Syllabus ---
+  if (/\b(blueprint|syllabus|course\s+map)\b/.test(q)) {
+    return {
+      reply: "Opening the course blueprint.",
+      action: () => actions.navigateView?.("blueprint"),
+    };
+  }
+
   const openMatch = q.match(/(?:open|show|load)\s+(.+)/);
   if (openMatch) {
     if (ctx.sessions === null) return { reply: "Still loading your sessions — ask again in a moment." };
@@ -88,10 +170,23 @@ function handleCommand(query: string, ctx: AssistantContext, actions: AssistantA
     if (target) return { reply: `Opening ${target.title}.`, action: () => actions.openSession(target.id) };
     return { reply: `I cannot find that. Your sessions: ${uniqueTitles(ctx.sessions) || "none yet"}.` };
   }
+
   if (/\bnotes?\b/.test(q) && /\b(open|show|write)\b/.test(q)) {
     if (!ctx.sessionTitle) return { reply: "Open a session first, then I will take you to its notes." };
     return { reply: "Opening your notes.", action: actions.openNotes };
   }
+
+  const noteMatch = q.match(/(?:note\s+down|take\s+a\s+note|add\s+note|save\s+note|dictate\s+note)\s*[:\-]?\s*(.+)/);
+  if (noteMatch) {
+    if (!ctx.sessionTitle) return { reply: "Open a session first, then I will attach notes to it." };
+    const noteText = noteMatch[1].trim();
+    if (!noteText) return { reply: "What should I note down?" };
+    return {
+      reply: `Noted: "${noteText}".`,
+      action: () => actions.appendNote(noteText),
+    };
+  }
+
   const deleteMatch = q.match(/(?:delete|purge|remove|clear)\s+(.+)/);
   if (deleteMatch || /\b(delete|purge|remove|clear)\b/.test(q)) {
     // A named target wins over the open session — never delete the wrong one.
@@ -105,6 +200,35 @@ function handleCommand(query: string, ctx: AssistantContext, actions: AssistantA
     }
     if (!ctx.sessionTitle) return { reply: "There is no open session to delete." };
     return { reply: `Deleting "${ctx.sessionTitle}" after your confirmation.`, action: actions.purgeCurrent };
+  }
+
+  // --- Knowledge Queries: "What are my topics?", "What is [X]?", "Explain [X]" ---
+  if (/\b(what\s+are\s+my\s+topics|list\s+topics|show\s+topics|all\s+topics)\b/.test(q)) {
+    if (ctx.topics && ctx.topics.length > 0) {
+      return { reply: `Current course topics: ${ctx.topics.map((t) => t.title).join("; ")}.` };
+    }
+    return { reply: "No course topics loaded yet. Open a session from home first." };
+  }
+
+  const explainMatch = q.match(/(?:what\s+is|explain|tell\s+me\s+about)\s+(.+)/);
+  if (explainMatch) {
+    const term = explainMatch[1].replace(/[?.,!]/g, "").trim();
+    if (ctx.topics && ctx.topics.length > 0) {
+      const hit = ctx.topics.find(
+        (t) => t.title.toLowerCase().includes(term) || (t.code && t.code.toLowerCase() === term),
+      );
+      if (hit) {
+        return {
+          reply: `${hit.title}: ${hit.summary || "This topic is part of your exam syllabus. You can explore its prerequisites in the Knowledge Graph."}`,
+        };
+      }
+    }
+    const weakHit = ctx.weakTopics.find((w) => w.title.toLowerCase().includes(term));
+    if (weakHit) {
+      return {
+        reply: `"${weakHit.title}" is flagged as a vulnerable topic on your exam. Review its remediation card or practice new questions on it.`,
+      };
+    }
   }
 
   // --- Reporting: the agent sees the screen state ---
@@ -132,10 +256,23 @@ function handleCommand(query: string, ctx: AssistantContext, actions: AssistantA
   if (/\b(help|what can you|commands)\b/.test(q)) {
     return {
       reply:
-        "I can open sessions by name, take you home or to notes, delete the open session, and report progress, weak topics, revision, countdown, or where you are. Try: open my cardio session.",
+        "I can navigate your entire study loop. Try asking: 'show mastery board', 'open knowledge graph', 'show weak topics', 'what are my topics', 'note down [idea]', or 'take exam'.",
     };
   }
-  return { reply: "I can open sessions, navigate, delete, and report progress, weak topics, revision, or countdown. Try: where am I?" };
+
+  // --- Smart Topic Fallback ---
+  if (ctx.topics && ctx.topics.length > 0) {
+    const directHit = ctx.topics.find((t) => q.includes(t.title.toLowerCase()));
+    if (directHit) {
+      return {
+        reply: `${directHit.title} is part of your course blueprint. Would you like to view it in the Knowledge Graph or practice an exam?`,
+      };
+    }
+  }
+
+  return {
+    reply: `I heard "${query}". You can ask me to open the Mastery Board, view the Knowledge Graph, check weak topics, or take notes.`,
+  };
 }
 
 // Orb assistant: click toggles the conversation panel. Mic dictates into the
@@ -231,7 +368,14 @@ export function Assistant({
   const transcribe = async (blob: Blob): Promise<string> => {
     setWorking(true);
     try {
-      const { text } = await transcribeAudio(blob);
+      const promptContext = [
+        contextRef.current.sessionTitle,
+        ...contextRef.current.weakTopics.map((w) => w.title),
+        contextRef.current.reviseNext,
+      ]
+        .filter(Boolean)
+        .join(", ");
+      const { text } = await transcribeAudio(blob, promptContext || undefined);
       return text.trim();
     } catch {
       setLog((cur) => [

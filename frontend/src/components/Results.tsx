@@ -25,6 +25,8 @@ export function Results({
   exam,
   topics = [],
   busy,
+  tab: controlledTab,
+  onTabChange,
   onRemediate,
   onOpenQuote,
 }: {
@@ -32,10 +34,17 @@ export function Results({
   exam: Exam;
   topics?: Topic[];
   busy: boolean;
+  tab?: "diagnosis" | "board" | "graph";
+  onTabChange?: (tab: "diagnosis" | "board" | "graph") => void;
   onRemediate: () => void;
   onOpenQuote: (page: number, quote: string) => void;
 }) {
-  const [activeTab, setActiveTab] = useState<"diagnosis" | "board" | "graph">("diagnosis");
+  const [internalTab, setInternalTab] = useState<"diagnosis" | "board" | "graph">("diagnosis");
+  const activeTab = controlledTab ?? internalTab;
+  const setActiveTab = (newTab: "diagnosis" | "board" | "graph") => {
+    setInternalTab(newTab);
+    onTabChange?.(newTab);
+  };
   const [inspectingTopicId, setInspectingTopicId] = useState<string | null>(null);
   const [itemFilter, setItemFilter] = useState<string>("ALL");
   const [searchQuery, setSearchQuery] = useState<string>("");

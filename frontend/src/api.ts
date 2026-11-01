@@ -124,9 +124,12 @@ export function getRevision(sessionId: string): Promise<{ session_id: string; it
   return request(`/api/v1/sessions/${sessionId}/revision`);
 }
 
-export function transcribeAudio(blob: Blob): Promise<{ text: string; language?: string; duration_s?: number }> {
+export function transcribeAudio(blob: Blob, prompt?: string): Promise<{ text: string; language?: string; duration_s?: number }> {
   const form = new FormData();
   form.append("audio", blob, "utterance.webm");
+  if (prompt && prompt.trim()) {
+    form.append("prompt", prompt.trim());
+  }
   return request("/api/v1/speech/transcribe", { method: "POST", body: form });
 }
 

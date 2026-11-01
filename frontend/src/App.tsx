@@ -5,10 +5,12 @@ import {
   extractBlueprint,
   generateExam,
   getDelta,
+  getNotes,
   getPlan,
   getRevision,
   listSessions,
   remediate,
+  saveNotes,
   submitExam,
   uploadDocuments,
 } from "./api";
@@ -74,6 +76,7 @@ export default function App() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [quoted, setQuoted] = useState<{ page: number; quote: string } | null>(null);
+  const [resultsTab, setResultsTab] = useState<"diagnosis" | "board" | "graph">("diagnosis");
 
   const run = async (busyText: string, work: () => Promise<void>) => {
     setBusy(busyText);
@@ -257,6 +260,41 @@ export default function App() {
     purgeSession: (id: string, title: string) => {
       purgeSummary({ session_id: id, title } as SessionSummary);
     },
+    appendNote: (text: string) => {
+      if (!session) return;
+      const id = session.session_id;
+      const stamp = new Date().toLocaleString(undefined, {
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      });
+      void (async () => {
+        try {
+          const current = await getNotes(id);
+          const base = current.notes_md?.trim() ? `${current.notes_md.trim()}\n` : "";
+          await saveNotes(id, `${base}- [voice ${stamp}] ${text}`);
+          setHomeToken((t) => t + 1);
+        } catch {
+          setError("Could not save the note — try again from the Notes screen.");
+        }
+      })();
+    },
+    navigateView: (target: string) => {
+      if (["setup", "home", "blueprint", "exam", "results", "remediation", "retest", "delta", "notes"].includes(target)) {
+        setView(target as View);
+      }
+    },
+    setResultsTab: (tab: "diagnosis" | "board" | "graph") => {
+      setResultsTab(tab);
+      setView("results");
+    },
+    startExam: () => {
+      if (session) void buildExam();
+    },
+    startRemediation: () => {
+      if (grade) void buildRemediation();
+    },
   };
 
   const assistantCtx = useMemo(assistantContext, [session, grade, delta, assistantPlan, assistantRevision, assistantDelta, assistantSessions, view]);
@@ -340,6 +378,8 @@ export default function App() {
           exam={exam}
           topics={topics}
           busy={Boolean(busy)}
+          tab={resultsTab}
+          onTabChange={setResultsTab}
           onRemediate={buildRemediation}
           onOpenQuote={(page, quote) => setQuoted({ page, quote })}
         />
@@ -407,6 +447,7 @@ export default function App() {
       reviseNext: next ? `Revise ${next.title} by ${next.review_on}.` : null,
       examCountdown: countdown,
       sessions: assistantSessions,
+      topics: topics.map((t) => ({ id: t.topic_id, title: t.title, code: t.code, summary: t.code })),
     };
   }
 }

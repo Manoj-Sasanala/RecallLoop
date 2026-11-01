@@ -517,11 +517,12 @@ def _get_model():
     return _model
 
 
-def transcribe_audio(data: bytes, filename: str = "audio.webm") -> dict:
+def transcribe_audio(data: bytes, filename: str = "audio.webm", prompt: str | None = None) -> dict:
     """Local speech-to-text via faster-whisper (our own transcription).
 
     Audio is decoded to 16 kHz mono PCM with a bundled static ffmpeg and fed
     to the model as an array, so no cloud STT and no PyAV are involved.
+    Optionally accepts an initial_prompt to bias recognition towards course-specific terms.
     Returns {"text": ...}.
     """
     import subprocess
@@ -557,8 +558,13 @@ def transcribe_audio(data: bytes, filename: str = "audio.webm") -> dict:
         pcm = np.frombuffer(raw, dtype=np.float32)
         if pcm.size == 0:
             return {"text": "", "language": "en", "duration_s": 0.0}
+        
+        transcribe_kwargs = {"language": "en", "beam_size": 1, "vad_filter": True}
+        if prompt and prompt.strip():
+            transcribe_kwargs["initial_prompt"] = prompt.strip()
+
         segments, info = _get_model().transcribe(
-            pcm, language="en", beam_size=1, vad_filter=True
+            pcm, **transcribe_kwargs
         )
         text = " ".join(seg.text.strip() for seg in segments).strip()
         return {"text": text, "language": info.language, "duration_s": round(info.duration, 2)}
