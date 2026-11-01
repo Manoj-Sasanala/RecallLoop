@@ -436,8 +436,44 @@ export function Assistant({
     setMicLevel(0);
   };
 
+  // Restart live listening after speech ends. The mic is paused while
+  // Jarvis speaks, so resume needs a fresh stream.
+  const resumeLiveAfterSpeech = () => {
+    if (!liveRef.current) return;
+    void (async () => {
+      const stream = await requestMic();
+      if (!liveRef.current || !stream) return;
+      try {
+        stopRef.current = await startLoop(stream, {
+          onSegment: ({ blob }) => void handleSegment(blob, "live"),
+          onLevel: (v) => setMicLevel(Math.min(1, v * 4)),
+          onError: (message) => {
+            liveRef.current = false;
+            setListening(false);
+            setMicLevel(0);
+            setLog((cur) => [...cur, { who: "jarvis", text: message }]);
+          },
+        });
+        setListening(true);
+      } catch {
+        liveRef.current = false;
+        setListening(false);
+      }
+    })();
+  };
+
   const speak = (text: string) => {
     try {
+      // Stop listening while speaking: pause the mic so our own voice can
+      // never be recorded as input. Live listening resumes when speech ends.
+      try {
+        stopRef.current?.();
+      } catch {
+        /* already stopped */
+      }
+      stopRef.current = null;
+      setListening(false);
+      setMicLevel(0);
       speakingRef.current = true;
       setSpeaking(true);
       lastSpokenRef.current = text.toLowerCase();
@@ -448,6 +484,7 @@ export function Assistant({
         speakingRef.current = false;
         setSpeaking(false);
         lastSpokeEndRef.current = Date.now();
+        resumeLiveAfterSpeech();
       };
       window.speechSynthesis.speak(utterance);
     } catch {
@@ -566,6 +603,9 @@ export function Assistant({
   const lastSpokeEndRef = useRef(0);
 
   const handleSegment = async (blob: Blob, mode: "dictate" | "live") => {
+    // Mic is paused while speaking: drop anything that arrives late so our
+    // own voice can never become input. Resume happens after speech ends.
+    if (speakingRef.current) return;
     setWorking(true);
     const text = await transcribe(blob);
     setWorking(false);
@@ -609,7 +649,17 @@ export function Assistant({
   };
 
   // Mic: dictate once into the box. Second tap stops early; silence stops it.
+  // Tapping while Jarvis speaks stops the voice first, then listens.
   const dictate = async () => {
+    if (speakingRef.current) {
+      try {
+        window.speechSynthesis.cancel();
+      } catch {
+        /* already stopped */
+      }
+      speakingRef.current = false;
+      setSpeaking(false);
+    }
     if (stopRef.current) {
       stopRef.current();
       stopRef.current = null;
@@ -637,6 +687,8 @@ export function Assistant({
   };
 
   // Live: continuous conversation. Talk freely; segments transcribe and answer.
+  // The mic pauses while Jarvis speaks and resumes after, so replies are
+  // never recorded as input. Enabling Live mid-speech stops the voice first.
   const toggleLive = async () => {
     if (liveRef.current) {
       liveRef.current = false;
@@ -661,6 +713,15 @@ export function Assistant({
     if (!support.ok) {
       setLog((cur) => [...cur, { who: "jarvis", text: support.reason }]);
       return;
+    }
+    if (speakingRef.current) {
+      try {
+        window.speechSynthesis.cancel();
+      } catch {
+        /* already stopped */
+      }
+      speakingRef.current = false;
+      setSpeaking(false);
     }
     const stream = await requestMic();
     if (!stream) {
