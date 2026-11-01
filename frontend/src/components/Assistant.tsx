@@ -305,6 +305,7 @@ export function Assistant({
   ]);
   const stopRef = useRef<(() => void) | null>(null);
   const lastEmptyNoticeRef = useRef(0);
+  const lastAskedRef = useRef<{ text: string; at: number }>({ text: "", at: 0 });
   const liveRef = useRef(false);
   const speakingRef = useRef(false);
   const lastSpokenRef = useRef("");
@@ -368,6 +369,16 @@ export function Assistant({
   const ask = (text: string) => {
     const query = text.trim();
     if (!query) return;
+    // Loop breaker: never answer the identical utterance twice within 8s.
+    // A repeated self-echo dies here even if echo matching missed it.
+    const now = Date.now();
+    if (
+      lastAskedRef.current.text === query.toLowerCase() &&
+      now - lastAskedRef.current.at < 8000
+    ) {
+      return;
+    }
+    lastAskedRef.current = { text: query.toLowerCase(), at: now };
     const { reply, action } = handleCommand(query, contextRef.current, actionsRef.current);
     setLog((cur) => [...cur, { who: "you", text: query }, { who: "jarvis", text: reply }]);
     setInput("");
@@ -398,14 +409,44 @@ export function Assistant({
     }
   };
 
-  // Barge-in: user starts talking while Jarvis speaks. Our own echo is short
-  // and matches what we just said — ignore it. Returns true when this is the
-  // user interrupting (speech already stopped), false for echo or silence.
+  // Echo of our own voice picked up by the mic: same words as what Jarvis
+  // just said, in the same order. Anything else while speaking is the user
+  // barging in. Length-independent — a full-sentence echo must also match.
+  const isOwnEcho = (heardText: string): boolean => {
+    const said = lastSpokenRef.current;
+    if (!said) return false;
+    const norm = (s: string) =>
+      s
+        .toLowerCase()
+        .replace(/[^a-z0-9 ]/g, " ")
+        .split(/\s+/)
+        .filter((w) => w.length > 0);
+    const heard = norm(heardText);
+    const spoken = norm(said);
+    if (heard.length === 0) return true;
+    const spokenSet = new Set(spoken);
+    const overlap = heard.filter((w) => spokenSet.has(w)).length;
+    if (overlap / heard.length < 0.6) return false;
+    // Order check: echo follows the reply's word order.
+    let pos = -1;
+    let ordered = 0;
+    for (const w of heard) {
+      const next = spoken.indexOf(w, pos + 1);
+      if (next > pos) {
+        ordered++;
+        pos = next;
+      }
+    }
+    return ordered / heard.length >= 0.5;
+  };
+
+  // Barge-in: user starts talking while Jarvis speaks. Echo (above) is
+  // dropped; real user speech stops the voice and gets answered.
   const heardWhileSpeaking = (text: string): boolean => {
     if (!speakingRef.current) return true;
-    const heard = text.toLowerCase().trim();
+    const heard = text.trim();
     if (!heard) return false;
-    if (heard.length < 25 && lastSpokenRef.current.includes(heard)) return false;
+    if (isOwnEcho(heard)) return false;
     try {
       window.speechSynthesis.cancel();
     } catch {
