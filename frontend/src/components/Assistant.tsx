@@ -28,39 +28,102 @@ export type AssistantActions = {
   purgeCurrent: () => void;
   purgeSession: (id: string, title: string) => void;
   appendNote: (text: string) => void;
+  setHomeTab?: (tab: "sessions" | "planner" | "progress") => void;
   navigateView?: (view: string) => void;
-  setResultsTab?: (tab: "diagnosis" | "board" | "graph") => void;
+  setResultsTab?: (tab: "diagnosis" | "board" | "graph" | "canvas") => void;
   startExam?: () => void;
   startRemediation?: () => void;
 };
 
 type CommandResult = { reply: string; action?: () => void };
 
+/**
+ * Obsidian-style Quick Switcher character-span fuzzy matcher and heuristic scorer (adapted from Obsidian app.js cx & ux).
+ */
+function fuzzyScore(query: string, target: string): number | null {
+  const q = query.toLowerCase().trim();
+  const t = target.toLowerCase().trim();
+  if (!q) return 0;
+  if (t === q) return 100;
+  if (t.includes(q)) return 50 + (q.length / t.length) * 30;
+
+  let qIdx = 0;
+  const matches: [number, number][] = [];
+  let casingBonus = 0;
+
+  for (let i = 0; i < t.length && qIdx < q.length; i++) {
+    if (t[i] === q[qIdx]) {
+      if (i === 0 || /[\s_\-/]/.test(target[i - 1]) || (target[i] !== t[i] && target[i - 1] === t[i - 1])) {
+        casingBonus++;
+      }
+      if (matches.length === 0) {
+        matches.push([i, i + 1]);
+      } else {
+        const last = matches[matches.length - 1];
+        if (last[1] === i) {
+          last[1] = i + 1;
+        } else {
+          matches.push([i, i + 1]);
+        }
+      }
+      qIdx++;
+    }
+  }
+
+  if (qIdx < q.length) return null;
+
+  let score = 25;
+  score -= Math.max(0, matches.length - 1) * 3; // Contiguous match reward
+  score += casingBonus * 2.5; // Word/CamelCase boundary bonus
+  const span = matches[matches.length - 1][1] - matches[0][0];
+  score -= (span - q.length) * 0.5; // Gap penalty
+  score -= matches[0][0] * 0.2; // Start penalty
+  score -= t.length * 0.05;
+  return score;
+}
+
 function findSession(ctx: { sessions: AssistantSessionRef[] | null }, query: string): AssistantSessionRef | null {
   const sessions = ctx.sessions ?? [];
   const FILLER = /^(hey|hi|hello|okay|please|jarvis|can you|could you|would you|will you|kindly|i want you to|i want to|now)\b[, ]*/;
   const NOISE = /\b(please|kindly|her|him|it|this|that|the|a|an|my|session|thing|stuff|for me|me)\b/g;
   const COMMAND_WORDS = /^(open|show|load|delete|purge|remove|clear|start|quiz|exam|go|take)$/;
-  const words = query
+  const clean = query
     .toLowerCase()
     .replace(/[?,.!"']/g, " ")
     .replace(FILLER, "")
     .replace(NOISE, " ")
+    .trim();
+  const words = clean
     .split(/[^a-z0-9]+/)
     .filter((w) => w.length > 1 && !COMMAND_WORDS.test(w));
-  if (words.length === 0) return null;
-  const wordHit = (a: string, b: string): boolean => {
-    if (a === b) return true;
-    const n = Math.min(5, a.length, b.length);
-    return n >= 4 && a.slice(0, n) === b.slice(0, n);
-  };
+  if (words.length === 0 && !clean) return null;
+
   const ranked = sessions
     .map((s) => {
+      // 1. Direct Obsidian fuzzy score on title
+      const directScore = fuzzyScore(clean, s.title);
+      if (directScore !== null && directScore > 0) return { s, score: directScore + 20 };
+
+      // 2. Token-level fuzzy match, plus a phonetic-prefix fallback for
+      // misheard words where the subsequence matcher finds nothing
+      // ("cardiologist" vs "cardiology": extra letters break subsequence).
       const titleWords = s.title.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+      const prefixHit = (a: string, b: string): boolean => {
+        const n = Math.min(5, a.length, b.length);
+        return n >= 4 && a.slice(0, n) === b.slice(0, n);
+      };
       let score = 0;
       for (const w of words) {
         if (w.length < 3) continue;
-        if (titleWords.some((t) => wordHit(w, t))) score += w.length >= 6 ? 2 : 1;
+        for (const tw of titleWords) {
+          const fs = fuzzyScore(w, tw);
+          if (fs !== null && fs > 0) {
+            score += fs;
+          } else if (prefixHit(w, tw)) {
+            // Longer real words outrank short ones ("cardiology" > "cardio").
+            score += w.length >= 6 ? tw.length : tw.length / 2;
+          }
+        }
       }
       return { s, score };
     })
@@ -124,7 +187,7 @@ function handleCommand(query: string, ctx: AssistantContext, actions: AssistantA
   }
 
   // --- Obsidian-style Knowledge Graph ---
-  if (/\b(knowledge\s+graph|obsidian|graph|network|concept\s+map|visualize)\b/.test(q)) {
+  if (/\b(knowledge\s+graph|graph|network|concept\s+map|visualize)\b/.test(q)) {
     if (!ctx.hasTopics) return { reply: "Open a session first, then I will show its Knowledge Graph." };
     return {
       reply: "Opening the Knowledge Mastery Network Graph.",
@@ -134,6 +197,18 @@ function handleCommand(query: string, ctx: AssistantContext, actions: AssistantA
         } else {
           actions.navigateView?.("blueprint");
         }
+      },
+    };
+  }
+
+  // --- Obsidian-style Spatial Study Canvas ---
+  if (/\b(canvas|study\s+canvas|obsidian\s+canvas|spatial|whiteboard|2d\s+board)\b/.test(q)) {
+    if (!ctx.hasGrade) return { reply: "Finish an exam first — then I will open your 2D Study Canvas." };
+    return {
+      reply: "Opening the Obsidian-format Spatial Study Canvas.",
+      action: () => {
+        actions.setResultsTab?.("canvas");
+        actions.navigateView?.("results");
       },
     };
   }
@@ -162,8 +237,22 @@ function handleCommand(query: string, ctx: AssistantContext, actions: AssistantA
     };
   }
 
+  // --- Home tabs: Sessions / Planner / Progress ---
+  // Navigation verbs win; bare "planner"/"progress" nouns also count, but
+  // reporting questions ("what is my progress?") keep their own intent.
+  const wantsTab = /^(open|show|go|take me|switch|view|see|display)\b/.test(q) || /^(planner|progress|calendar)$/.test(q);
+  if (wantsTab && /\b(planner|calendar|revision\s+schedule)\b/.test(q)) {
+    return { reply: "Opening the revision planner.", action: () => { actions.setHomeTab?.("planner"); actions.navigateView?.("home"); } };
+  }
+  if (wantsTab && /\b(progress(\s+graph|\s+chart)?|daily\s+progress)\b/.test(q)) {
+    return { reply: "Opening your daily progress.", action: () => { actions.setHomeTab?.("progress"); actions.navigateView?.("home"); } };
+  }
+  if (wantsTab && /\bsessions?\b/.test(q)) {
+    return { reply: "Showing your sessions.", action: () => { actions.setHomeTab?.("sessions"); actions.navigateView?.("home"); } };
+  }
+
   // --- Exam / Test ---
-  if (/(?:start|take|generate|begin|run|launch)\s+(?:an?\s+|the\s+|this\s+|that\s+|my\s+)?(exam|test|quiz)\b/.test(q) || q === "start exam" || q === "take exam") {
+  if (/(?:start|take|generate|begin|run|launch)\b.{0,30}\b(exam|test|quiz)\b/.test(q) || q === "start exam" || q === "take exam") {
     if (!ctx.sessionTitle || !ctx.hasTopics) return { reply: "Open a session first, then I will start its exam." };
     return {
       reply: "Starting your exam session.",

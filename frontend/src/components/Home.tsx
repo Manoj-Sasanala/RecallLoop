@@ -29,18 +29,21 @@ export function Home({
   onPurge,
   onNew,
   refreshToken,
+  tab,
+  onTabChange,
 }: {
   onOpen: (session: SessionSummary) => void;
   onNotes: (session: SessionSummary) => void;
   onPurge: (session: SessionSummary) => void;
   onNew: () => void;
   refreshToken: number;
+  tab: "sessions" | "planner" | "progress";
+  onTabChange: (tab: "sessions" | "planner" | "progress") => void;
 }) {
   const [sessions, setSessions] = useState<SessionSummary[] | null>(null);
   const [revise, setRevise] = useState<Record<string, string>>({});
   const [plans, setPlans] = useState<Record<string, RevisionItem[]>>({});
   const [examPlans, setExamPlans] = useState<Record<string, SessionPlan>>({});
-  const [tab, setTab] = useState<"sessions" | "planner" | "progress">("sessions");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -115,7 +118,7 @@ export function Home({
               className={`btn small ${tab === "sessions" ? "primary" : ""}`}
               role="tab"
               aria-selected={tab === "sessions"}
-              onClick={() => setTab("sessions")}
+              onClick={() => onTabChange("sessions")}
             >
               Sessions
             </button>
@@ -123,7 +126,7 @@ export function Home({
               className={`btn small ${tab === "planner" ? "primary" : ""}`}
               role="tab"
               aria-selected={tab === "planner"}
-              onClick={() => setTab("planner")}
+              onClick={() => onTabChange("planner")}
             >
               Planner
             </button>
@@ -131,7 +134,7 @@ export function Home({
               className={`btn small ${tab === "progress" ? "primary" : ""}`}
               role="tab"
               aria-selected={tab === "progress"}
-              onClick={() => setTab("progress")}
+              onClick={() => onTabChange("progress")}
             >
               Progress
             </button>

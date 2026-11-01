@@ -46,6 +46,92 @@ function studyPageMarkdown(
   return `${lines.join("\n")}\n`;
 }
 
+/**
+ * Generates markdown tailored for Obsidian vaults:
+ * - YAML frontmatter with tags & delta properties
+ * - [[Wikilinks]] to concepts
+ * - Obsidian Callout syntax (> [!danger], > [!tip], > [!quote], > [!summary])
+ * - Interactive checklist syntax (- [x], - [ ])
+ */
+function studyPageObsidianMarkdown(
+  title: string,
+  grade: GradeResult | null,
+  plan: RemediationPlan | null,
+  delta: Delta,
+  notesMd: string,
+): string {
+  const first = delta.rounds[0];
+  const last = delta.rounds[delta.rounds.length - 1];
+  const deltaMastery = (last?.mastery_score ?? 0) - (first?.mastery_score ?? 0);
+
+  const lines = [
+    "---",
+    `title: "${title} - Mastery Study Note"`,
+    "type: study-delta",
+    "tags:",
+    "  - recalloop",
+    "  - delta-study",
+    "  - active-recall",
+    "  - misconception-remediation",
+    `date: ${new Date().toISOString().slice(0, 10)}`,
+    `initial_mastery: ${Math.round((first?.mastery_score ?? 0) * 100)}%`,
+    `final_mastery: ${Math.round((last?.mastery_score ?? 0) * 100)}%`,
+    `mastery_delta_pts: ${Math.round(deltaMastery * 100)}`,
+    `lures_resolved_rate: ${Math.round(delta.lure_resolution_rate * 100)}%`,
+    "---",
+    "",
+    `# [[${title}]] — Mastery Study Note`,
+    "",
+    "> [!summary] Learning Delta & Metacognition",
+    `> - **Mastery Growth**: ${Math.round((first?.mastery_score ?? 0) * 100)}% → **${Math.round((last?.mastery_score ?? 0) * 100)}%** (${deltaMastery >= 0 ? "+" : ""}${Math.round(deltaMastery * 100)} pts)`,
+    `> - **Accuracy**: ${Math.round((first?.raw_accuracy ?? 0) * 100)}% → **${Math.round((last?.raw_accuracy ?? 0) * 100)}%**`,
+    `> - **Lure Resolution Rate**: ${Math.round(delta.lure_resolution_rate * 100)}%`,
+    "",
+  ];
+
+  if (plan && plan.remediation_cards.length > 0) {
+    lines.push("## Misconception Traps & Remediation Cards", "");
+    for (const card of plan.remediation_cards) {
+      lines.push(`### Topic: [[${card.topic_title}]]`, "");
+      if (card.trapped_misconception) {
+        lines.push(`> [!danger] Lure Entrapment`);
+        lines.push(`> **Faulty Intuition**: \`${card.trapped_misconception}\``);
+        lines.push(`> `);
+        lines.push(`> **Verbatim Source Truth** (p. ${card.source_page}):`);
+        lines.push(`> > "${card.source_truth_quote}"`);
+        lines.push("");
+      }
+      lines.push(`> [!tip] Corrective Rule & Physics Reasoning`);
+      lines.push(`> ${card.corrective_explanation_md.replace(/\n/g, "\n> ")}`);
+      lines.push("");
+    }
+  }
+
+  if (grade) {
+    lines.push("## Question Audit & Distractor Review", "");
+    for (const item of grade.graded_items) {
+      const mark = item.is_correct ? "x" : " ";
+      const matchedTopic = item.endorsed_misconception
+        ? grade.topic_breakdown.find((t) => t.trapped_misconceptions.includes(item.endorsed_misconception!))
+        : null;
+      const topicTag = matchedTopic ? ` (Topic: [[${matchedTopic.title}]])` : "";
+      lines.push(`- [${mark}] **${item.stem}**${topicTag}`);
+      if (!item.is_correct) {
+        lines.push(`  - **Your Choice**: ${item.selected_option_text}`);
+        lines.push(`  - **Key**: Option ${item.correct_option_id}`);
+        lines.push(`  - **Verification**: "${item.verbatim_source_quote}" (p. ${item.source_page_number})`);
+      }
+    }
+    lines.push("");
+  }
+
+  if (notesMd.trim()) {
+    lines.push("## Student Working Notes", "", notesMd.trim(), "");
+  }
+
+  return `${lines.join("\n")}\n`;
+}
+
 export function DeltaView({
   delta,
   grade,
@@ -76,6 +162,11 @@ export function DeltaView({
     return studyPageMarkdown(sessionTitle, grade, plan, delta, notes.notes_md ?? "");
   };
 
+  const buildObsidianPage = async () => {
+    const notes = await getNotes(delta.session_id).catch(() => ({ notes_md: "" }));
+    return studyPageObsidianMarkdown(sessionTitle, grade, plan, delta, notes.notes_md ?? "");
+  };
+
   const download = async () => {
     const md = await buildPage();
     const blob = new Blob([md], { type: "text/markdown" });
@@ -83,6 +174,17 @@ export function DeltaView({
     const link = document.createElement("a");
     link.href = url;
     link.download = `${slug}-study-page.md`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const downloadObsidian = async () => {
+    const md = await buildObsidianPage();
+    const blob = new Blob([md], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${slug}-obsidian-vault.md`;
     link.click();
     URL.revokeObjectURL(url);
   };
@@ -214,6 +316,14 @@ export function DeltaView({
           <span className="spacer" />
           <button className="btn" onClick={() => void download()}>
             Export study page
+          </button>
+          <button
+            className="btn"
+            style={{ borderColor: "#a78bfa", color: "#a78bfa" }}
+            onClick={() => void downloadObsidian()}
+            title="Download formatted with Obsidian callouts (> [!danger], > [!tip]) and [[Wikilinks]]"
+          >
+            💜 Obsidian Vault (.md)
           </button>
           <button className="btn" onClick={() => void copyShareText()}>
             {copied ? "Copied!" : "Copy share text"}

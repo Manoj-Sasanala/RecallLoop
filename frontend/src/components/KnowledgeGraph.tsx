@@ -101,9 +101,9 @@ export function KnowledgeGraph({
         const nodes = Array.from(prev.values());
         const W = 680;
         const H = 340;
-        const damping = 0.85;
 
-        // Repulsion among nodes
+        // Repulsion & Anti-collision packing among nodes (adapted from Obsidian sim.js Barnes-Hut & circle packing)
+        const collisionMinDist = 72; // Prevents pill overlap
         for (let i = 0; i < nodes.length; i++) {
           for (let j = i + 1; j < nodes.length; j++) {
             const a = nodes[i];
@@ -111,7 +111,9 @@ export function KnowledgeGraph({
             const dx = b.x - a.x;
             const dy = b.y - a.y;
             const dist = Math.hypot(dx, dy) || 1;
-            const force = 1800 / (dist * dist);
+            
+            // Standard inverse-square repulsion
+            const force = 2200 / (dist * dist);
             const fx = (dx / dist) * force;
             const fy = (dy / dist) * force;
             if (a.id !== draggingNode) {
@@ -122,45 +124,67 @@ export function KnowledgeGraph({
               b.vx += fx;
               b.vy += fy;
             }
+
+            // Anti-collision circle packing force from Obsidian sim.js
+            if (dist < collisionMinDist) {
+              const overlap = ((collisionMinDist - dist) / dist) * 0.48;
+              const ox = dx * overlap;
+              const oy = dy * overlap;
+              if (a.id !== draggingNode) {
+                a.vx -= ox;
+                a.vy -= oy;
+              }
+              if (b.id !== draggingNode) {
+                b.vx += ox;
+                b.vy += oy;
+              }
+            }
           }
         }
 
-        // Springs along prerequisite edges
+        // Springs along prerequisite edges with degree weighting (from Obsidian sim.js link force q)
         for (const t of topics) {
           const b = prev.get(t.topic_id);
           if (!b) continue;
+          const degB = Math.max(1, (t.prerequisites?.length ?? 0) + t.out_degree);
           for (const pId of t.prerequisites ?? []) {
             const a = prev.get(pId);
             if (!a) continue;
+            const topicA = byId.get(pId);
+            const degA = Math.max(1, (topicA?.prerequisites?.length ?? 0) + (topicA?.out_degree ?? 1));
+            const weightA = degB / (degA + degB);
+            const weightB = degA / (degA + degB);
+
             const dx = b.x - a.x;
             const dy = b.y - a.y;
             const dist = Math.hypot(dx, dy) || 1;
-            const rest = 140;
-            const force = (dist - rest) * 0.04;
+            const rest = 145;
+            const force = (dist - rest) * 0.045;
             const fx = (dx / dist) * force;
             const fy = (dy / dist) * force;
             if (a.id !== draggingNode) {
-              a.vx += fx;
-              a.vy += fy;
+              a.vx += fx * weightA;
+              a.vy += fy * weightA;
             }
             if (b.id !== draggingNode) {
-              b.vx -= fx;
-              b.vy -= fy;
+              b.vx -= fx * weightB;
+              b.vy -= fy * weightB;
             }
           }
         }
 
-        // Center gravity
+        // Center gravity with velocity damping (from Obsidian sim.js alpha & damping)
+        const damping = 0.72;
         for (const n of nodes) {
           if (n.id === draggingNode) continue;
-          n.vx += (W / 2 - n.x) * 0.015;
-          n.vy += (H / 2 - n.y) * 0.015;
+          n.vx += (W / 2 - n.x) * 0.018;
+          n.vy += (H / 2 - n.y) * 0.018;
 
           n.vx *= damping;
           n.vy *= damping;
 
-          n.x += Math.max(-15, Math.min(15, n.vx));
-          n.y += Math.max(-15, Math.min(15, n.vy));
+          n.x += Math.max(-14, Math.min(14, n.vx));
+          n.y += Math.max(-14, Math.min(14, n.vy));
         }
 
         return new Map(nodes.map((n) => [n.id, { ...n }]));

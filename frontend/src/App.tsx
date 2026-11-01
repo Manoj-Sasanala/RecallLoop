@@ -62,6 +62,7 @@ const PROGRESS: Record<string, string> = {
 export default function App() {
   const [view, setView] = useState<View>("home");
   const [homeToken, setHomeToken] = useState(0);
+  const [homeTab, setHomeTab] = useState<"sessions" | "planner" | "progress">("sessions");
   const [notesTarget, setNotesTarget] = useState<SessionSummary | null>(null);
   const [assistantPlan, setAssistantPlan] = useState<SessionPlan | null>(null);
   const [assistantRevision, setAssistantRevision] = useState<RevisionItem[]>([]);
@@ -76,7 +77,7 @@ export default function App() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [quoted, setQuoted] = useState<{ page: number; quote: string } | null>(null);
-  const [resultsTab, setResultsTab] = useState<"diagnosis" | "board" | "graph">("diagnosis");
+  const [resultsTab, setResultsTab] = useState<"diagnosis" | "board" | "graph" | "canvas">("diagnosis");
 
   const run = async (busyText: string, work: () => Promise<void>) => {
     setBusy(busyText);
@@ -285,7 +286,10 @@ export default function App() {
         setView(target as View);
       }
     },
-    setResultsTab: (tab: "diagnosis" | "board" | "graph") => {
+    setHomeTab: (tab: "sessions" | "planner" | "progress") => {
+      setHomeTab(tab);
+    },
+    setResultsTab: (tab: "diagnosis" | "board" | "graph" | "canvas") => {
       setResultsTab(tab);
       setView("results");
     },
@@ -335,6 +339,8 @@ export default function App() {
       {view === "home" && (
         <Home
           refreshToken={homeToken}
+          tab={homeTab}
+          onTabChange={setHomeTab}
           onNew={() => setView("setup")}
           onOpen={openSession}
           onNotes={(s) => {

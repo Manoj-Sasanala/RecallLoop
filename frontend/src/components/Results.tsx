@@ -3,6 +3,7 @@ import type { Exam, GradeResult, Topic } from "../types";
 import { BacklinksDrawer, type BacklinksDrawerData } from "./BacklinksDrawer";
 import { KnowledgeGraph, type TopicMasteryInfo } from "./KnowledgeGraph";
 import { MasteryBoard } from "./MasteryBoard";
+import { StudyCanvas } from "./StudyCanvas";
 
 const STATE_LABEL: Record<string, string> = {
   MASTERED: "Mastered",
@@ -34,14 +35,14 @@ export function Results({
   exam: Exam;
   topics?: Topic[];
   busy: boolean;
-  tab?: "diagnosis" | "board" | "graph";
-  onTabChange?: (tab: "diagnosis" | "board" | "graph") => void;
+  tab?: "diagnosis" | "board" | "graph" | "canvas";
+  onTabChange?: (tab: "diagnosis" | "board" | "graph" | "canvas") => void;
   onRemediate: () => void;
   onOpenQuote: (page: number, quote: string) => void;
 }) {
-  const [internalTab, setInternalTab] = useState<"diagnosis" | "board" | "graph">("diagnosis");
+  const [internalTab, setInternalTab] = useState<"diagnosis" | "board" | "graph" | "canvas">("diagnosis");
   const activeTab = controlledTab ?? internalTab;
-  const setActiveTab = (newTab: "diagnosis" | "board" | "graph") => {
+  const setActiveTab = (newTab: "diagnosis" | "board" | "graph" | "canvas") => {
     setInternalTab(newTab);
     onTabChange?.(newTab);
   };
@@ -226,6 +227,12 @@ export function Results({
           >
             🌐 Knowledge Graph (Obsidian View)
           </button>
+          <button
+            className={`btn small ${activeTab === "canvas" ? "primary" : ""}`}
+            onClick={() => setActiveTab("canvas")}
+          >
+            🧭 Study Canvas (Obsidian .canvas)
+          </button>
         </div>
         <span className="small muted">
           {topics.length > 0 ? `${topics.length} topics mapped with live diagnostic status` : ""}
@@ -266,6 +273,24 @@ export function Results({
             mastery={masteryMap}
             selectedTopicId={inspectingTopicId}
             onSelectTopic={(id) => setInspectingTopicId(id)}
+          />
+        </section>
+      )}
+
+      {activeTab === "canvas" && (
+        <section className="panel mt-16" aria-labelledby="obsidian-canvas-heading">
+          <div className="panel-head">
+            <div>
+              <h2 id="obsidian-canvas-heading">Spatial Study Canvas (Obsidian Format)</h2>
+              <span className="hint">
+                Infinite 2D spatial workspace &middot; Drag weak topics &amp; lure entrapment cards &middot; Direct .canvas JSON export
+              </span>
+            </div>
+          </div>
+          <StudyCanvas
+            grade={grade}
+            topics={topics}
+            onOpenQuote={onOpenQuote}
           />
         </section>
       )}
