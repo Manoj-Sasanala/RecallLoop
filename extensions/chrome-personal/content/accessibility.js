@@ -9,7 +9,12 @@ export function snapshotFromNode(root, { maxChars = 50000, depth = 15 } = {}) {
     const role = ROLE_MAP[node.tagName] || (node.children?.length ? 'container' : 'text');
     if (['button', 'link', 'textbox', 'combobox', 'heading'].includes(role)) {
       n += 1;
-      const name = (node.getAttribute?.('aria-label') || node.getAttribute?.('placeholder') || node.textContent || '').trim().slice(0, 80);
+      try { node.setAttribute?.('data-personal-ref', 'ref_' + n); } catch {}
+      const type = (node.getAttribute?.('type') || '').toLowerCase();
+      const sensitive = type === 'password' || node.tagName === 'TEXTAREA' ||
+        /pass|secret|token|ssn/i.test(node.getAttribute?.('aria-label') || node.getAttribute?.('name') || '');
+      const name = sensitive ? '[redacted]'
+        : (node.getAttribute?.('aria-label') || node.getAttribute?.('placeholder') || node.textContent || '').trim().slice(0, 80);
       lines.push(`${'  '.repeat(Math.min(d, 8))}${role} "${name}" [ref_${n}]`);
     }
     for (const c of (node.children || [])) walk(c, d + 1);

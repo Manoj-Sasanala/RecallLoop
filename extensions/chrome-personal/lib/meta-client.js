@@ -1,13 +1,17 @@
 const ALLOWED_TOOLS = new Set(['navigate', 'read', 'click', 'type', 'scroll', 'js', 'screenshot', 'stop']);
 
-// Extract first {...} block so chatty models still yield an action.
+// Scan candidate {...} blocks; first valid action wins so chatty replies stay safe.
 export function parseAction(text) {
-  const m = String(text || '').match(/\{[\s\S]*\}/);
-  if (!m) throw new Error('no action JSON found');
-  let o;
-  try { o = JSON.parse(m[0]); } catch { throw new Error('invalid action JSON'); }
-  if (!o.tool || !ALLOWED_TOOLS.has(o.tool)) throw new Error('unknown tool: ' + o.tool);
-  return o;
+  const s = String(text || '');
+  let unknown = null;
+  for (const m of s.matchAll(/\{[^{}]*\}/g)) {
+    let o;
+    try { o = JSON.parse(m[0]); } catch { continue; }
+    if (o.tool && ALLOWED_TOOLS.has(o.tool)) return o;
+    if (o.tool) unknown = o.tool;
+  }
+  if (unknown) throw new Error('unknown tool: ' + unknown);
+  throw new Error('no action JSON found');
 }
 
 export async function chatAction({ baseUrl, key, model, messages, fetchImpl }) {

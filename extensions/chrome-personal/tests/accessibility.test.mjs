@@ -14,6 +14,17 @@ test('snapshot names button with ref and caps output', () => {
   assert.match(r.tree, /link "Go" \[ref_2\]/);
 });
 
+test('snapshot redacts password and sensitive inputs', () => {
+  const root = el('DIV', {}, [
+    el('INPUT', { type: 'password', 'aria-label': 'Secret hunter2' }),
+    el('TEXTAREA', {}, [], 'my private diary text'),
+  ]);
+  const r = snapshotFromNode(root, { maxChars: 50000 });
+  assert.doesNotMatch(r.tree, /hunter2/);
+  assert.doesNotMatch(r.tree, /private diary/);
+  assert.match(r.tree, /\[redacted\]/);
+});
+
 test('snapshot respects maxChars with truncation note', () => {
   const root = el('DIV', {}, [el('BUTTON', {}, [], 'A'.repeat(100))]);
   const r = snapshotFromNode(root, { maxChars: 40 });

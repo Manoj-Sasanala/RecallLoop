@@ -10,6 +10,11 @@ test('parseAction rejects unknown tool', () => {
   assert.throws(() => parseAction('{"tool":"launch_missiles"}'), /unknown tool/);
 });
 
+test('parseAction picks first valid action from chatty reply', () => {
+  const r = parseAction('Sure:\n{"tool":"read"}\nand also {"tool":"click","ref":"ref_9"}');
+  assert.equal(r.tool, 'read');
+});
+
 test('chatAction errors when key is missing', async () => {
   await assert.rejects(() => chatAction({ baseUrl: 'https://x', key: '', model: 'm', messages: [] }), /missing Meta API key/);
 });
