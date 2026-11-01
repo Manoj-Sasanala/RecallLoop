@@ -272,6 +272,17 @@ function handleCommand(query: string, ctx: AssistantContext, actions: AssistantA
     };
   }
 
+  // --- Open a session by name (fuzzy: "open cardiologist") ---
+  // --- New session: start a fresh study session (upload or demo) ---
+  // Runs before "open ..." matching so "create a new session" builds one
+  // instead of searching for one.
+  if (
+    /\b(new session|create|fresh session|start (a )?new|upload\b)/.test(q) &&
+    !/(?:open|show|load)\s+\S/.test(q)
+  ) {
+    return { reply: "Starting a fresh session — upload a PDF or pick a demo course.", action: () => actions.navigateView?.("setup") };
+  }
+
   const openMatch = q.match(/(?:open|show|load)\s+(.+)/);
   if (openMatch) {
     if (ctx.sessions === null) return { reply: "Still loading your sessions — ask again in a moment." };
@@ -445,7 +456,7 @@ export function Assistant({
       if (!liveRef.current || !stream) return;
       try {
         stopRef.current = await startLoop(stream, {
-          onSegment: ({ blob }) => void handleSegment(blob, "live"),
+          onSegment: ({ blob, seconds }) => void handleSegment(blob, "live", seconds),
           onLevel: (v) => setMicLevel(Math.min(1, v * 4)),
           onError: (message) => {
             liveRef.current = false;
@@ -602,7 +613,7 @@ export function Assistant({
   const KILL_WORDS = /\b(stop|quiet|shut up|hold on|wait|listen to me)\b/;
   const lastSpokeEndRef = useRef(0);
 
-  const handleSegment = async (blob: Blob, mode: "dictate" | "live") => {
+  const handleSegment = async (blob: Blob, mode: "dictate" | "live", seconds = 0) => {
     // Mic is paused while speaking: drop anything that arrives late so our
     // own voice can never become input. Resume happens after speech ends.
     if (speakingRef.current) return;
@@ -610,9 +621,10 @@ export function Assistant({
     const text = await transcribe(blob);
     setWorking(false);
     if (!text) {
-      // Mic captured sound but no words came out — say so instead of silence.
+      // Only complain about long captures — short blips are just pauses.
+      // Throttled so room noise does not spam the chat.
       const now = Date.now();
-      if (now - (lastEmptyNoticeRef.current || 0) > 10000) {
+      if (seconds > 2 && now - (lastEmptyNoticeRef.current || 0) > 10000) {
         lastEmptyNoticeRef.current = now;
         setLog((cur) => [
           ...cur,
@@ -674,7 +686,7 @@ export function Assistant({
     liveRef.current = false;
     try {
       stopRef.current = await recordOnce({
-        onSegment: ({ blob }) => void handleSegment(blob, "dictate"),
+        onSegment: ({ blob, seconds }) => void handleSegment(blob, "dictate", seconds),
         onLevel: (v) => setMicLevel(Math.min(1, v * 4)),
         onError: (message) =>
           setLog((cur) => [...cur, { who: "jarvis", text: message }]),
@@ -731,7 +743,7 @@ export function Assistant({
     liveRef.current = true;
     try {
       stopRef.current = await startLoop(stream, {
-        onSegment: ({ blob }) => void handleSegment(blob, "live"),
+        onSegment: ({ blob, seconds }) => void handleSegment(blob, "live", seconds),
         onLevel: (v) => setMicLevel(Math.min(1, v * 4)),
         onError: (message) => {
           liveRef.current = false;

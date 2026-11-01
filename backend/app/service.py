@@ -500,6 +500,7 @@ def _valid_date(value: str) -> bool:
 
 _model_lock = None
 _model = None
+_warmup_started = False
 
 
 def _get_model():
@@ -515,6 +516,23 @@ def _get_model():
 
                 _model = WhisperModel("base", device="cpu", compute_type="int8")
     return _model
+
+
+def warmup_transcriber() -> None:
+    """Preload the Whisper model in a background thread at server startup.
+
+    The first transcription otherwise pays the full model download + load
+    cost inline, which is the long pause users feel on their first utterance.
+    Never raises: transcription lazily loads on demand as a fallback.
+    """
+    global _warmup_started
+    if _warmup_started:
+        return
+    _warmup_started = True
+    try:
+        _get_model()
+    except Exception:
+        pass
 
 
 def transcribe_audio(data: bytes, filename: str = "audio.webm", prompt: str | None = None) -> dict:
