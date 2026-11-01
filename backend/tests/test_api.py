@@ -249,3 +249,25 @@ def test_upload_reports_pages_and_tokens(api, tmp_path):
 def test_health(api):
     client, _engine = api
     assert client.get("/health").json()["status"] == "ok"
+
+
+def test_transcribe_silence_returns_empty_text(api):
+    import io
+    import struct
+    import wave
+
+    client, _engine = api
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(16000)
+        wav.writeframes(struct.pack("<8000h", *([0] * 8000)))
+    replied = client.post(
+        "/api/v1/speech/transcribe",
+        files={"audio": ("blank.wav", buf.getvalue(), "audio/wav")},
+    )
+    assert replied.status_code == 200, replied.text
+    body = replied.json()
+    assert "text" in body
+    assert isinstance(body["text"], str)

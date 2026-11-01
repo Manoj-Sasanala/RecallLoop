@@ -64,7 +64,7 @@ export default function App() {
   const [assistantPlan, setAssistantPlan] = useState<SessionPlan | null>(null);
   const [assistantRevision, setAssistantRevision] = useState<RevisionItem[]>([]);
   const [assistantDelta, setAssistantDelta] = useState<Delta | null>(null);
-  const [assistantSessions, setAssistantSessions] = useState<AssistantSessionRef[]>([]);
+  const [assistantSessions, setAssistantSessions] = useState<AssistantSessionRef[] | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [topics, setTopics] = useState<Topic[]>([]);
   const [exam, setExam] = useState<ExamData | null>(null);
@@ -237,7 +237,7 @@ export default function App() {
       setHomeToken((t) => t + 1);
     },
     openSession: (id: string) => {
-      const found = assistantSessions.find((s) => s.id === id);
+      const found = (assistantSessions ?? []).find((s) => s.id === id);
       if (!found) return;
       openSession({ session_id: found.id, title: found.title } as SessionSummary);
     },

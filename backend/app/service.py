@@ -498,6 +498,74 @@ def _valid_date(value: str) -> bool:
         return False
 
 
+_model_lock = None
+_model = None
+
+
+def _get_model():
+    global _model, _model_lock
+    if _model is None:
+        import threading
+
+        if _model_lock is None:
+            _model_lock = threading.Lock()
+        with _model_lock:
+            if _model is None:
+                from faster_whisper import WhisperModel
+
+                _model = WhisperModel("base", device="cpu", compute_type="int8")
+    return _model
+
+
+def transcribe_audio(data: bytes, filename: str = "audio.webm") -> dict:
+    """Local speech-to-text via faster-whisper (our own transcription).
+
+    Audio is decoded to 16 kHz mono PCM with a bundled static ffmpeg and fed
+    to the model as an array, so no cloud STT and no PyAV are involved.
+    Returns {"text": ...}.
+    """
+    import subprocess
+    import tempfile
+    from pathlib import Path
+
+    import imageio_ffmpeg
+    import numpy as np
+
+    suffix = Path(filename).suffix or ".webm"
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        tmp.write(data)
+        tmp_path = tmp.name
+    try:
+        raw = subprocess.run(
+            [
+                imageio_ffmpeg.get_ffmpeg_exe(),
+                "-nostdin",
+                "-i",
+                tmp_path,
+                "-ar",
+                "16000",
+                "-ac",
+                "1",
+                "-f",
+                "f32le",
+                "-",
+            ],
+            capture_output=True,
+            check=True,
+            timeout=120,
+        ).stdout
+        pcm = np.frombuffer(raw, dtype=np.float32)
+        if pcm.size == 0:
+            return {"text": "", "language": "en", "duration_s": 0.0}
+        segments, info = _get_model().transcribe(
+            pcm, language="en", beam_size=1, vad_filter=True
+        )
+        text = " ".join(seg.text.strip() for seg in segments).strip()
+        return {"text": text, "language": info.language, "duration_s": round(info.duration, 2)}
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)
+
+
 def revision_plan(db: Session, session: StudySession) -> dict:
     """Deterministic next-review dates from the latest graded round.
 

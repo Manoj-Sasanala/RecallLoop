@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import { recordOnce, requestMic, startLoop } from "../recorder";
+import { transcribeAudio } from "../api";
 
 export type AssistantSessionRef = { id: string; title: string };
 
@@ -10,7 +12,7 @@ export type AssistantContext = {
   weakTopics: { title: string; reviewOn?: string }[];
   reviseNext: string | null;
   examCountdown: string | null;
-  sessions: AssistantSessionRef[];
+  sessions: AssistantSessionRef[] | null;
 };
 
 export type AssistantActions = {
@@ -21,35 +23,10 @@ export type AssistantActions = {
   purgeSession: (id: string, title: string) => void;
 };
 
-declare global {
-  interface Window {
-    SpeechRecognition?: new () => SpeechRecognitionInstance;
-    webkitSpeechRecognition?: new () => SpeechRecognitionInstance;
-  }
-}
-
-type SpeechRecognitionInstance = {
-  lang: string;
-  continuous: boolean;
-  interimResults: boolean;
-  onresult:
-    | ((
-        event: {
-          resultIndex: number;
-          results: { isFinal: boolean; 0: { transcript: string } }[];
-        },
-      ) => void)
-    | null;
-  onerror: ((event: { error?: string }) => void) | null;
-  onend: (() => void) | null;
-  start: () => void;
-  stop: () => void;
-  abort: () => void;
-};
-
 type CommandResult = { reply: string; action?: () => void };
 
-function findSession(ctx: AssistantContext, query: string): AssistantSessionRef | null {
+function findSession(ctx: { sessions: AssistantSessionRef[] | null }, query: string): AssistantSessionRef | null {
+  const sessions = ctx.sessions ?? [];
   const FILLER = /^(hey|hi|hello|okay|please|jarvis|can you|could you|would you|will you|kindly|i want you to|i want to|now)\b[, ]*/;
   const NOISE = /\b(please|kindly|her|him|it|this|that|the|a|an|my|session|thing|stuff|for me|me)\b/g;
   const COMMAND_WORDS = /^(open|show|load|delete|purge|remove|clear|start|quiz|exam|go|take)$/;
@@ -66,7 +43,7 @@ function findSession(ctx: AssistantContext, query: string): AssistantSessionRef 
     const n = Math.min(5, a.length, b.length);
     return n >= 4 && a.slice(0, n) === b.slice(0, n);
   };
-  const ranked = ctx.sessions
+  const ranked = sessions
     .map((s) => {
       const titleWords = s.title.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
       let score = 0;
@@ -81,7 +58,8 @@ function findSession(ctx: AssistantContext, query: string): AssistantSessionRef 
   return ranked.length > 0 ? ranked[0].s : null;
 }
 
-function uniqueTitles(sessions: AssistantSessionRef[], limit = 4): string {  const titles = [...new Set(sessions.map((s) => s.title))];
+function uniqueTitles(sessions: AssistantSessionRef[] | null, limit = 4): string {
+  const titles = [...new Set((sessions ?? []).map((s) => s.title))];
   const shown = titles.slice(0, limit).join("; ");
   return titles.length > limit ? `${shown}; and ${titles.length - limit} more` : shown;
 }
@@ -100,11 +78,12 @@ function handleCommand(query: string, ctx: AssistantContext, actions: AssistantA
   const q = query.toLowerCase().trim();
 
   // --- Actions: the agent operates the app ---
-  if (/\b(go\s+)?home\b/.test(q) || q === "home") {
+  if (/\b(go\s+)?home\b/.test(q) || q === "home" || /\b(all sessions|all my sessions|main page|main screen|back to (all )?sessions|go back|home screen|session list)\b/.test(q)) {
     return { reply: "Taking you home.", action: actions.goHome };
   }
   const openMatch = q.match(/(?:open|show|load)\s+(.+)/);
   if (openMatch) {
+    if (ctx.sessions === null) return { reply: "Still loading your sessions — ask again in a moment." };
     const target = findSession(ctx, openMatch[1]);
     if (target) return { reply: `Opening ${target.title}.`, action: () => actions.openSession(target.id) };
     return { reply: `I cannot find that. Your sessions: ${uniqueTitles(ctx.sessions) || "none yet"}.` };
@@ -116,10 +95,11 @@ function handleCommand(query: string, ctx: AssistantContext, actions: AssistantA
   const deleteMatch = q.match(/(?:delete|purge|remove|clear)\s+(.+)/);
   if (deleteMatch || /\b(delete|purge|remove|clear)\b/.test(q)) {
     // A named target wins over the open session — never delete the wrong one.
-    const named = deleteMatch ? findSession(ctx, deleteMatch[1]) : null;
+    const named = deleteMatch && ctx.sessions !== null ? findSession(ctx, deleteMatch[1]) : null;
     if (named) {
       return { reply: `Deleting "${named.title}" after your confirmation.`, action: () => actions.purgeSession(named.id, named.title) };
     }
+    if (ctx.sessions === null) return { reply: "Still loading your sessions — ask again in a moment." };
     if (deleteMatch && hasTargetWords(deleteMatch[1])) {
       return { reply: `I cannot find that. Your sessions: ${uniqueTitles(ctx.sessions) || "none yet"}.` };
     }
@@ -159,8 +139,8 @@ function handleCommand(query: string, ctx: AssistantContext, actions: AssistantA
 }
 
 // Orb assistant: click toggles the conversation panel. Mic dictates into the
-// box; Live holds an open conversation; spoken replies play back. No model
-// calls — answers come from live session data, actions drive the app.
+// box; Live holds an open conversation; spoken replies play back. Hearing is
+// our own faster-whisper endpoint — no browser or cloud speech recognition.
 export function Assistant({
   context,
   actions,
@@ -172,16 +152,14 @@ export function Assistant({
   const [input, setInput] = useState("");
   const [listening, setListening] = useState(false);
   const [speaking, setSpeaking] = useState(false);
+  const [working, setWorking] = useState(false);
   const [log, setLog] = useState<{ who: "you" | "jarvis"; text: string }[]>([
     { who: "jarvis", text: "Systems online. Ask, dictate, or go live — I can also open and organize for you." },
   ]);
-  const recogRef = useRef<SpeechRecognitionInstance | null>(null);
-  const convoRef = useRef(false);
+  const stopRef = useRef<(() => void) | null>(null);
+  const liveRef = useRef(false);
   const speakingRef = useRef(false);
-  const suppressUntilRef = useRef(0);
   const lastSpokenRef = useRef("");
-  const pendingRef = useRef("");
-  const flushTimerRef = useRef<number | undefined>(undefined);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const contextRef = useRef(context);
   contextRef.current = context;
@@ -194,39 +172,42 @@ export function Assistant({
 
   useEffect(
     () => () => {
-      convoRef.current = false;
-      window.clearTimeout(flushTimerRef.current);
-      pendingRef.current = "";
-      try {
-        recogRef.current?.abort();
-      } catch {
-        /* already stopped */
-      }
-      try {
-        window.speechSynthesis.cancel();
-      } catch {
-        /* audio unavailable */
-      }
+      stopAll();
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
+
+  const stopAll = () => {
+    liveRef.current = false;
+    try {
+      stopRef.current?.();
+    } catch {
+      /* already stopped */
+    }
+    stopRef.current = null;
+    try {
+      window.speechSynthesis.cancel();
+    } catch {
+      /* audio unavailable */
+    }
+    speakingRef.current = false;
+    setListening(false);
+    setSpeaking(false);
+    setWorking(false);
+  };
 
   const speak = (text: string) => {
     try {
       speakingRef.current = true;
       setSpeaking(true);
       lastSpokenRef.current = text.toLowerCase();
-      suppressUntilRef.current = Date.now() + 700;
-      // Mic stays open during speech so the user can interrupt. Echo of our
-      // own reply is filtered in onresult; real speech cancels this speech.
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.rate = 1.05;
       utterance.onend = utterance.onerror = () => {
         speakingRef.current = false;
         setSpeaking(false);
-        // Fresh recognizer: restarting a dead instance is unreliable.
-        if (convoRef.current) ensureLive();
       };
       window.speechSynthesis.speak(utterance);
     } catch {
@@ -245,165 +226,118 @@ export function Assistant({
     action?.();
   };
 
-  const startRecog = (continuous: boolean, onFinal: (text: string) => void): boolean => {
-    const Ctor = window.SpeechRecognition ?? window.webkitSpeechRecognition;
-    if (!Ctor) return false;
+  const transcribe = async (blob: Blob): Promise<string> => {
+    setWorking(true);
     try {
-      recogRef.current?.abort();
+      const { text } = await transcribeAudio(blob);
+      return text.trim();
     } catch {
-      /* nothing running */
-    }
-    const recog = new Ctor();
-    recogRef.current = recog;
-    recog.lang = "en-US";
-    recog.continuous = continuous;
-    recog.interimResults = true;
-    recog.onresult = (event) => {
-      let finalText = "";
-      let interimText = "";
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        if (event.results[i].isFinal) finalText += event.results[i][0].transcript;
-        else interimText += event.results[i][0].transcript;
-      }
-      // Barge-in: user starts talking while Jarvis speaks. Stop talking
-      // now, but wait for them to finish (2s of silence) before answering.
-      // Echo of our own reply is short and matches what we just said.
-      if (speakingRef.current) {
-        const heard = (finalText + " " + interimText).toLowerCase().trim();
-        if (!heard || Date.now() < suppressUntilRef.current) return;
-        const echo =
-          heard.length < 20 && lastSpokenRef.current.includes(heard);
-        if (echo) return;
-        try {
-          window.speechSynthesis.cancel();
-        } catch {
-          /* already stopped */
-        }
-        speakingRef.current = false;
-        setSpeaking(false);
-      }
-      // Live transcription in the box so it feels instant.
-      if (interimText.trim()) setInput((pendingRef.current + " " + interimText).trim());
-      if (finalText.trim()) {
-        pendingRef.current = `${pendingRef.current} ${finalText}`.trim();
-        setInput(pendingRef.current);
-        // End-of-speech grace: answer only after 2s of silence, so pauses
-        // mid-thought do not cut the user off.
-        window.clearTimeout(flushTimerRef.current);
-        flushTimerRef.current = window.setTimeout(() => {
-          const said = pendingRef.current.trim();
-          pendingRef.current = "";
-          if (said) onFinal(said);
-        }, 2000);
-      }
-    };
-    recog.onerror = (event: { error?: string }) => {
-      const kind = event?.error ?? "";
-      // Fatal: mic blocked, no mic, or no network for the speech service.
-      // Tell the user instead of silently restarting forever.
-      if (kind === "not-allowed" || kind === "service-not-allowed" || kind === "audio-capture") {
-        convoRef.current = false;
-        setListening(false);
-        const why =
-          kind === "not-allowed"
-            ? "Microphone blocked — allow access in the browser and tap Live again."
-            : kind === "audio-capture"
-              ? "No microphone found — connect one, or type instead."
-              : "Speech service unreachable — check the internet connection and tap Live again.";
-        setLog((cur) => [...cur, { who: "jarvis", text: why }]);
-        return;
-      }
-      // Transient (no-speech, aborted, network blip): restart if still live.
-      if (convoRef.current && continuous) {
-        window.setTimeout(() => {
-          if (convoRef.current && !speakingRef.current) ensureLive();
-        }, 300);
-      } else if (!convoRef.current) {
-        setListening(false);
-      }
-    };
-    recog.onend = () => {
-      if (convoRef.current && continuous && !speakingRef.current) {
-        window.setTimeout(() => {
-          if (convoRef.current && !speakingRef.current) ensureLive();
-        }, 300);
-      } else {
-        setListening(false);
-      }
-    };
-    try {
-      recog.start();
-      setListening(true);
-      return true;
-    } catch {
-      setListening(false);
-      return false;
+      setLog((cur) => [
+        ...cur,
+        { who: "jarvis", text: "I could not transcribe that — try again, a little louder." },
+      ]);
+      return "";
+    } finally {
+      setWorking(false);
     }
   };
 
-  // Restart live listening on a fresh recognizer. Restarting the same
-  // instance after it ended is unreliable — a new one always works.
-  const ensureLive = (): boolean => {
-    if (!convoRef.current) return false;
-    return startRecog(true, (text) => ask(text));
-  };
-
-  // Mic: dictate once into the box. It types for you; you press Send.
-  // If Jarvis is speaking, the tap interrupts it first.
-  const dictate = () => {
+  // Barge-in: user starts talking while Jarvis speaks. Our own echo is short
+  // and matches what we just said — ignore it. Returns true when this is the
+  // user interrupting (speech already stopped), false for echo or silence.
+  const heardWhileSpeaking = (text: string): boolean => {
+    if (!speakingRef.current) return true;
+    const heard = text.toLowerCase().trim();
+    if (!heard) return false;
+    if (heard.length < 25 && lastSpokenRef.current.includes(heard)) return false;
     try {
       window.speechSynthesis.cancel();
     } catch {
-      /* nothing playing */
+      /* already stopped */
     }
     speakingRef.current = false;
     setSpeaking(false);
-    convoRef.current = false;
-    const ok = startRecog(false, (text) => {
+    return true;
+  };
+
+  const handleSegment = async (blob: Blob, mode: "dictate" | "live") => {
+    const text = await transcribe(blob);
+    if (!text) return;
+    if (mode === "dictate") {
       setInput((cur) => (cur ? `${cur} ${text}` : text));
-      try {
-        recogRef.current?.abort();
-      } catch {
-        /* single shot done */
-      }
+      return;
+    }
+    if (heardWhileSpeaking(text)) ask(text);
+  };
+
+  // Mic: dictate once into the box. Second tap stops early; silence stops it.
+  const dictate = async () => {
+    if (stopRef.current) {
+      stopRef.current();
+      stopRef.current = null;
       setListening(false);
-    });
-    if (!ok) {
-      setLog((cur) => [...cur, { who: "jarvis", text: "Voice input is not supported in this browser. Type instead." }]);
+      return;
+    }
+    liveRef.current = false;
+    try {
+      stopRef.current = await recordOnce({
+        onSegment: ({ blob }) => void handleSegment(blob, "dictate"),
+        onError: (message) =>
+          setLog((cur) => [...cur, { who: "jarvis", text: message }]),
+      });
+      setListening(true);
+    } catch {
+      setListening(false);
+      setLog((cur) => [...cur, { who: "jarvis", text: "Microphone blocked — allow access and try again." }]);
     }
   };
 
-  // Live: continuous conversation. Talk freely; replies speak back.
-  const toggleLive = () => {
-    if (convoRef.current) {
-      convoRef.current = false;
-      speakingRef.current = false;
-      window.clearTimeout(flushTimerRef.current);
-      pendingRef.current = "";
+  // Live: continuous conversation. Talk freely; segments transcribe and answer.
+  const toggleLive = async () => {
+    if (liveRef.current) {
+      liveRef.current = false;
+      try {
+        stopRef.current?.();
+      } catch {
+        /* already stopped */
+      }
+      stopRef.current = null;
       try {
         window.speechSynthesis.cancel();
       } catch {
         /* audio unavailable */
       }
-      try {
-        recogRef.current?.abort();
-      } catch {
-        /* already stopped */
-      }
+      speakingRef.current = false;
       setListening(false);
       setSpeaking(false);
       return;
     }
-    const Ctor = window.SpeechRecognition ?? window.webkitSpeechRecognition;
-    if (!Ctor) {
+    if (!navigator.mediaDevices?.getUserMedia) {
       setLog((cur) => [...cur, { who: "jarvis", text: "Voice input is not supported in this browser. Type instead." }]);
       return;
     }
-    convoRef.current = true;
-    startRecog(true, (text) => ask(text));
+    const stream = await requestMic();
+    if (!stream) {
+      setLog((cur) => [...cur, { who: "jarvis", text: "Microphone blocked — allow access and tap Live again." }]);
+      return;
+    }
+    liveRef.current = true;
+    try {
+      stopRef.current = await startLoop(stream, {
+        onSegment: ({ blob }) => void handleSegment(blob, "live"),
+        onError: () => {
+          liveRef.current = false;
+          setListening(false);
+        },
+      });
+      setListening(true);
+    } catch {
+      liveRef.current = false;
+      setListening(false);
+    }
   };
 
-  const orbActive = listening || speaking;
+  const orbActive = listening || speaking || working;
 
   return (
     <>
@@ -465,17 +399,17 @@ export function Assistant({
             <button className="btn small" onClick={() => ask(input)} aria-label="Send">
               Send
             </button>
-            <button className="btn small" onClick={dictate} aria-label="Dictate" title="Dictate into the box">
+            <button className="btn small" onClick={() => void dictate()} aria-label="Dictate" title="Dictate into the box">
               🎤
             </button>
             <button
-              className={`btn small${convoRef.current ? " primary" : ""}`}
-              onClick={toggleLive}
-              aria-label={convoRef.current ? "Stop live conversation" : "Start live conversation"}
-              aria-pressed={convoRef.current}
+              className={`btn small${liveRef.current ? " primary" : ""}`}
+              onClick={() => void toggleLive()}
+              aria-label={liveRef.current ? "Stop live conversation" : "Start live conversation"}
+              aria-pressed={liveRef.current}
               title="Live conversation: talk freely, hands-free"
             >
-              {convoRef.current ? "■ Live" : "● Live"}
+              {liveRef.current ? "■ Live" : "● Live"}
             </button>
           </div>
         </section>
