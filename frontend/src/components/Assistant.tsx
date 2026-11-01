@@ -265,7 +265,7 @@ function handleCommand(query: string, ctx: AssistantContext, actions: AssistantA
   if (/\b(help|what can you|commands)\b/.test(q)) {
     return {
       reply:
-        "I can navigate your entire study loop. Try asking: 'show mastery board', 'open knowledge graph', 'show weak topics', 'what are my topics', 'note down [idea]', or 'take exam'.",
+        "I can navigate your entire study loop. Try asking: 'show mastery board', 'open knowledge graph', 'show weak topics', 'what are my topics', 'note down [idea]', or 'take exam'. Say stop anytime to interrupt me.",
     };
   }
 
@@ -358,6 +358,7 @@ export function Assistant({
       utterance.onend = utterance.onerror = () => {
         speakingRef.current = false;
         setSpeaking(false);
+        lastSpokeEndRef.current = Date.now();
       };
       window.speechSynthesis.speak(utterance);
     } catch {
@@ -369,6 +370,19 @@ export function Assistant({
   const ask = (text: string) => {
     const query = text.trim();
     if (!query) return;
+    // Kill words work typed too: stop speech immediately, then listen.
+    if (/\b(stop|quiet|shut up|hold on|wait|listen to me)\b/i.test(query) && speakingRef.current) {
+      try {
+        window.speechSynthesis.cancel();
+      } catch {
+        /* already stopped */
+      }
+      speakingRef.current = false;
+      setSpeaking(false);
+      setLog((cur) => [...cur, { who: "you", text: query }, { who: "jarvis", text: "Stopped. I'm listening — go ahead." }]);
+      setInput("");
+      return;
+    }
     // Loop breaker: never answer the identical utterance twice within 8s.
     // A repeated self-echo dies here even if echo matching missed it.
     const now = Date.now();
@@ -410,8 +424,8 @@ export function Assistant({
   };
 
   // Echo of our own voice picked up by the mic: same words as what Jarvis
-  // just said, in the same order. Anything else while speaking is the user
-  // barging in. Length-independent — a full-sentence echo must also match.
+  // just said, in the same order. Applies while speaking AND for a few
+  // seconds after (room tail), so the reply can never trigger itself.
   const isOwnEcho = (heardText: string): boolean => {
     const said = lastSpokenRef.current;
     if (!said) return false;
@@ -457,6 +471,11 @@ export function Assistant({
     return true;
   };
 
+  // Kill words: "stop" (and friends) halts speech instantly and the words
+  // themselves are never answered — they are commands, not questions.
+  const KILL_WORDS = /\b(stop|quiet|shut up|hold on|wait|listen to me)\b/;
+  const lastSpokeEndRef = useRef(0);
+
   const handleSegment = async (blob: Blob, mode: "dictate" | "live") => {
     setWorking(true);
     const text = await transcribe(blob);
@@ -475,6 +494,26 @@ export function Assistant({
     }
     if (mode === "dictate") {
       setInput((cur) => (cur ? `${cur} ${text}` : text));
+      return;
+    }
+    // Kill words stop speech instantly and are never answered themselves.
+    // Only while speaking or just after — otherwise "wait, what?" is a question.
+    if (
+      KILL_WORDS.test(text.toLowerCase()) &&
+      (speakingRef.current || Date.now() - lastSpokeEndRef.current < 3000)
+    ) {
+      try {
+        window.speechSynthesis.cancel();
+      } catch {
+        /* already stopped */
+      }
+      speakingRef.current = false;
+      setSpeaking(false);
+      setLog((cur) => [...cur, { who: "you", text }, { who: "jarvis", text: "Stopped. I'm listening — go ahead." }]);
+      return;
+    }
+    // Room-tail echo: our own reply arriving just after speech ended.
+    if (!speakingRef.current && Date.now() - lastSpokeEndRef.current < 3000 && isOwnEcho(text)) {
       return;
     }
     if (heardWhileSpeaking(text)) ask(text);
