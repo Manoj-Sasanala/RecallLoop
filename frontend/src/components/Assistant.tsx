@@ -180,6 +180,8 @@ export function Assistant({
   const speakingRef = useRef(false);
   const suppressUntilRef = useRef(0);
   const lastSpokenRef = useRef("");
+  const pendingRef = useRef("");
+  const flushTimerRef = useRef<number | undefined>(undefined);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const contextRef = useRef(context);
   contextRef.current = context;
@@ -193,6 +195,8 @@ export function Assistant({
   useEffect(
     () => () => {
       convoRef.current = false;
+      window.clearTimeout(flushTimerRef.current);
+      pendingRef.current = "";
       try {
         recogRef.current?.abort();
       } catch {
@@ -261,9 +265,9 @@ export function Assistant({
         if (event.results[i].isFinal) finalText += event.results[i][0].transcript;
         else interimText += event.results[i][0].transcript;
       }
-      // Barge-in: user starts talking while Jarvis speaks. Echo of our own
-      // reply is short and matches what we just said — ignore it. Anything
-      // else past the echo grace window interrupts the speech.
+      // Barge-in: user starts talking while Jarvis speaks. Stop talking
+      // now, but wait for them to finish (2s of silence) before answering.
+      // Echo of our own reply is short and matches what we just said.
       if (speakingRef.current) {
         const heard = (finalText + " " + interimText).toLowerCase().trim();
         if (!heard || Date.now() < suppressUntilRef.current) return;
@@ -277,12 +281,21 @@ export function Assistant({
         }
         speakingRef.current = false;
         setSpeaking(false);
-        if (finalText.trim()) ask(finalText);
-        return;
       }
-      // Show live transcription as it arrives so it feels instant.
-      if (interimText.trim() && !finalText.trim()) setInput(interimText);
-      if (finalText.trim()) onFinal(finalText);
+      // Live transcription in the box so it feels instant.
+      if (interimText.trim()) setInput((pendingRef.current + " " + interimText).trim());
+      if (finalText.trim()) {
+        pendingRef.current = `${pendingRef.current} ${finalText}`.trim();
+        setInput(pendingRef.current);
+        // End-of-speech grace: answer only after 2s of silence, so pauses
+        // mid-thought do not cut the user off.
+        window.clearTimeout(flushTimerRef.current);
+        flushTimerRef.current = window.setTimeout(() => {
+          const said = pendingRef.current.trim();
+          pendingRef.current = "";
+          if (said) onFinal(said);
+        }, 2000);
+      }
     };
     recog.onerror = (event: { error?: string }) => {
       const kind = event?.error ?? "";
@@ -365,6 +378,8 @@ export function Assistant({
     if (convoRef.current) {
       convoRef.current = false;
       speakingRef.current = false;
+      window.clearTimeout(flushTimerRef.current);
+      pendingRef.current = "";
       try {
         window.speechSynthesis.cancel();
       } catch {
