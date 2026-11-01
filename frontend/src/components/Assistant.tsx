@@ -136,6 +136,8 @@ export function Assistant({
   const recogRef = useRef<SpeechRecognitionInstance | null>(null);
   const convoRef = useRef(false);
   const speakingRef = useRef(false);
+  const suppressUntilRef = useRef(0);
+  const lastSpokenRef = useRef("");
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const contextRef = useRef(context);
   contextRef.current = context;
@@ -167,11 +169,10 @@ export function Assistant({
     try {
       speakingRef.current = true;
       setSpeaking(true);
-      try {
-        recogRef.current?.abort();
-      } catch {
-        /* mic already stopped */
-      }
+      lastSpokenRef.current = text.toLowerCase();
+      suppressUntilRef.current = Date.now() + 700;
+      // Mic stays open during speech so the user can interrupt. Echo of our
+      // own reply is filtered in onresult; real speech cancels this speech.
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.rate = 1.05;
@@ -218,8 +219,29 @@ export function Assistant({
     recog.interimResults = continuous;
     recog.onresult = (event) => {
       let finalText = "";
+      let interimText = "";
       for (let i = event.resultIndex; i < event.results.length; i++) {
         if (event.results[i].isFinal) finalText += event.results[i][0].transcript;
+        else interimText += event.results[i][0].transcript;
+      }
+      // Barge-in: user starts talking while Jarvis speaks. Echo of our own
+      // reply is short and matches what we just said — ignore it. Anything
+      // else past the echo grace window interrupts the speech.
+      if (speakingRef.current) {
+        const heard = (finalText + " " + interimText).toLowerCase().trim();
+        if (!heard || Date.now() < suppressUntilRef.current) return;
+        const echo =
+          heard.length < 20 && lastSpokenRef.current.includes(heard);
+        if (echo) return;
+        try {
+          window.speechSynthesis.cancel();
+        } catch {
+          /* already stopped */
+        }
+        speakingRef.current = false;
+        setSpeaking(false);
+        if (finalText.trim()) ask(finalText);
+        return;
       }
       if (finalText.trim()) onFinal(finalText);
     };
@@ -248,8 +270,15 @@ export function Assistant({
   };
 
   // Mic: dictate once into the box. It types for you; you press Send.
+  // If Jarvis is speaking, the tap interrupts it first.
   const dictate = () => {
-    if (speakingRef.current) return;
+    try {
+      window.speechSynthesis.cancel();
+    } catch {
+      /* nothing playing */
+    }
+    speakingRef.current = false;
+    setSpeaking(false);
     convoRef.current = false;
     const ok = startRecog(false, (text) => {
       setInput((cur) => (cur ? `${cur} ${text}` : text));
