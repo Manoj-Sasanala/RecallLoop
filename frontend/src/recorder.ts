@@ -16,6 +16,7 @@ type Handlers = {
 const SILENCE_MS = 1500;
 const MIN_SPEECH_MS = 800;
 const MAX_SEGMENT_MS = 30000;
+const LOUDNESS_THRESHOLD = 0.008;
 
 function micErrorMessage(err: unknown): string {
   const name = err instanceof DOMException ? err.name : "";
@@ -57,6 +58,13 @@ export async function startLoop(
     }
   });
   const audioCtx = new AudioContext();
+  if (audioCtx.state === "suspended") {
+    try {
+      await audioCtx.resume();
+    } catch {
+      /* will run once user interacts */
+    }
+  }
   const source = audioCtx.createMediaStreamSource(stream);
   const analyser = audioCtx.createAnalyser();
   analyser.fftSize = 512;
@@ -135,7 +143,7 @@ export async function startLoop(
       const v = level();
       handlers.onLevel?.(v);
       const now = Date.now();
-      if (v > 0.02) {
+      if (v > LOUDNESS_THRESHOLD) {
         lastLoudAt = now;
         everLoud = true;
       }

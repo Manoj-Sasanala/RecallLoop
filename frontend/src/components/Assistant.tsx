@@ -263,7 +263,9 @@ export function Assistant({
   };
 
   const handleSegment = async (blob: Blob, mode: "dictate" | "live") => {
+    setWorking(true);
     const text = await transcribe(blob);
+    setWorking(false);
     if (!text) return;
     if (mode === "dictate") {
       setInput((cur) => (cur ? `${cur} ${text}` : text));
