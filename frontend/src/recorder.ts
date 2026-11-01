@@ -106,8 +106,10 @@ export async function startLoop(
   };
 
   const cutSegment = () => {
-    if (!recorder || recorder.state === "inactive" || chunks.length === 0) return;
-    const blob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
+    // Called from onstop, at which point state is already "inactive" —
+    // only the chunks tell us whether there is audio to send.
+    if (chunks.length === 0) return;
+    const blob = new Blob(chunks, { type: recorder?.mimeType || "audio/webm" });
     const seconds = (Date.now() - startedAt) / 1000;
     chunks = [];
     handlers.onSegment({ blob, seconds });

@@ -584,6 +584,9 @@ export function Assistant({
                 }}
               />
             </div>
+            <span className="small muted" style={{ minWidth: 92 }} aria-live="polite">
+              {working ? "Transcribing…" : listening ? "Listening…" : "Mic ready"}
+            </span>
             <input
               value={input}
               onChange={(e) => setInput(e.target.value)}
