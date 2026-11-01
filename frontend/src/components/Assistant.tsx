@@ -39,7 +39,7 @@ type SpeechRecognitionInstance = {
         },
       ) => void)
     | null;
-  onerror: (() => void) | null;
+  onerror: ((event: { error?: string }) => void) | null;
   onend: (() => void) | null;
   start: () => void;
   stop: () => void;
@@ -179,13 +179,8 @@ export function Assistant({
       utterance.onend = utterance.onerror = () => {
         speakingRef.current = false;
         setSpeaking(false);
-        if (convoRef.current && recogRef.current) {
-          try {
-            recogRef.current.start();
-          } catch {
-            /* already running or stopped: onend handler recovers */
-          }
-        }
+        // Fresh recognizer: restarting a dead instance is unreliable.
+        if (convoRef.current) ensureLive();
       };
       window.speechSynthesis.speak(utterance);
     } catch {
@@ -216,7 +211,7 @@ export function Assistant({
     recogRef.current = recog;
     recog.lang = "en-US";
     recog.continuous = continuous;
-    recog.interimResults = continuous;
+    recog.interimResults = true;
     recog.onresult = (event) => {
       let finalText = "";
       let interimText = "";
@@ -243,21 +238,43 @@ export function Assistant({
         if (finalText.trim()) ask(finalText);
         return;
       }
+      // Show live transcription as it arrives so it feels instant.
+      if (interimText.trim() && !finalText.trim()) setInput(interimText);
       if (finalText.trim()) onFinal(finalText);
     };
-    recog.onerror = () => {
-      if (!convoRef.current) setListening(false);
+    recog.onerror = (event: { error?: string }) => {
+      const kind = event?.error ?? "";
+      // Fatal: mic blocked, no mic, or no network for the speech service.
+      // Tell the user instead of silently restarting forever.
+      if (kind === "not-allowed" || kind === "service-not-allowed" || kind === "audio-capture") {
+        convoRef.current = false;
+        setListening(false);
+        const why =
+          kind === "not-allowed"
+            ? "Microphone blocked — allow access in the browser and tap Live again."
+            : kind === "audio-capture"
+              ? "No microphone found — connect one, or type instead."
+              : "Speech service unreachable — check the internet connection and tap Live again.";
+        setLog((cur) => [...cur, { who: "jarvis", text: why }]);
+        return;
+      }
+      // Transient (no-speech, aborted, network blip): restart if still live.
+      if (convoRef.current && continuous) {
+        window.setTimeout(() => {
+          if (convoRef.current && !speakingRef.current) ensureLive();
+        }, 300);
+      } else if (!convoRef.current) {
+        setListening(false);
+      }
     };
     recog.onend = () => {
       if (convoRef.current && continuous && !speakingRef.current) {
-        try {
-          recog.start();
-          return;
-        } catch {
-          /* fall through to stopped state */
-        }
+        window.setTimeout(() => {
+          if (convoRef.current && !speakingRef.current) ensureLive();
+        }, 300);
+      } else {
+        setListening(false);
       }
-      setListening(false);
     };
     try {
       recog.start();
@@ -267,6 +284,13 @@ export function Assistant({
       setListening(false);
       return false;
     }
+  };
+
+  // Restart live listening on a fresh recognizer. Restarting the same
+  // instance after it ended is unreliable — a new one always works.
+  const ensureLive = (): boolean => {
+    if (!convoRef.current) return false;
+    return startRecog(true, (text) => ask(text));
   };
 
   // Mic: dictate once into the box. It types for you; you press Send.
