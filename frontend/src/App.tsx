@@ -20,6 +20,7 @@ import { DeltaView } from "./components/DeltaView";
 import { Exam } from "./components/Exam";
 import { Home } from "./components/Home";
 import { NotesView } from "./components/NotesView";
+import { PagesView } from "./components/PagesView";
 import { QuoteDrawer } from "./components/QuoteDrawer";
 import { Remediation } from "./components/Remediation";
 import { Results } from "./components/Results";
@@ -39,7 +40,7 @@ import type {
   Topic,
 } from "./types";
 
-type View = Stage | "retest" | "notes";
+type View = Stage | "retest" | "notes" | "pages";
 
 const STEP_BY_VIEW: Record<View, number> = {
   home: 0,
@@ -51,6 +52,7 @@ const STEP_BY_VIEW: Record<View, number> = {
   retest: 3,
   delta: 3,
   notes: 0,
+  pages: 0,
 };
 
 const PROGRESS: Record<string, string> = {
@@ -64,6 +66,7 @@ export default function App() {
   const [homeToken, setHomeToken] = useState(0);
   const [homeTab, setHomeTab] = useState<"sessions" | "planner" | "progress">("sessions");
   const [notesTarget, setNotesTarget] = useState<SessionSummary | null>(null);
+  const [pagesTarget, setPagesTarget] = useState<SessionSummary | null>(null);
   const [assistantPlan, setAssistantPlan] = useState<SessionPlan | null>(null);
   const [assistantRevision, setAssistantRevision] = useState<RevisionItem[]>([]);
   const [assistantDelta, setAssistantDelta] = useState<Delta | null>(null);
@@ -103,6 +106,7 @@ export default function App() {
     setError(null);
     setQuoted(null);
     setNotesTarget(null);
+    setPagesTarget(null);
     setAssistantPlan(null);
     setAssistantRevision([]);
     setAssistantDelta(null);
@@ -250,6 +254,11 @@ export default function App() {
       setNotesTarget({ session_id: session.session_id, title: session.title } as SessionSummary);
       setView("notes");
     },
+    openPages: () => {
+      if (!session) return;
+      setPagesTarget({ session_id: session.session_id, title: session.title } as SessionSummary);
+      setView("pages");
+    },
     purgeCurrent: () => {
       if (!session) return;
       void run("Deleting session data...", async () => {
@@ -282,7 +291,7 @@ export default function App() {
       })();
     },
     navigateView: (target: string) => {
-      if (["setup", "home", "blueprint", "exam", "results", "remediation", "retest", "delta", "notes"].includes(target)) {
+      if (["setup", "home", "blueprint", "exam", "results", "remediation", "retest", "delta", "notes", "pages"].includes(target)) {
         setView(target as View);
       }
     },
@@ -347,6 +356,10 @@ export default function App() {
             setNotesTarget(s);
             setView("notes");
           }}
+          onPages={(s) => {
+            setPagesTarget(s);
+            setView("pages");
+          }}
           onPurge={purgeSummary}
         />
       )}
@@ -357,6 +370,18 @@ export default function App() {
           title={notesTarget.title}
           onBack={() => {
             setNotesTarget(null);
+            setHomeToken((t) => t + 1);
+            setView(session ? "delta" : "home");
+          }}
+        />
+      )}
+
+      {view === "pages" && pagesTarget && (
+        <PagesView
+          sessionId={pagesTarget.session_id}
+          title={pagesTarget.title}
+          onBack={() => {
+            setPagesTarget(null);
             setHomeToken((t) => t + 1);
             setView(session ? "delta" : "home");
           }}

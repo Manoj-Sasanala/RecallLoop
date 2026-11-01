@@ -3,6 +3,7 @@ import type {
   Delta,
   Exam,
   GradeResult,
+  NotePage,
   NotesPayload,
   PagePayload,
   RemediationPlan,
@@ -153,4 +154,31 @@ export function getPage(docId: string, pageNumber: number, quote?: string): Prom
 export async function deleteSession(sessionId: string): Promise<void> {
   const response = await fetch(`/api/v1/sessions/${sessionId}`, { method: "DELETE" });
   if (!response.ok) throw new Error("delete failed");
+}
+
+export function listNotePages(sessionId: string): Promise<{ pages: NotePage[] }> {
+  return request(`/api/v1/sessions/${sessionId}/pages`);
+}
+
+export function createNotePage(
+  sessionId: string,
+  body: { title: string; icon?: string; page_type?: string; parent_page_id?: string | null; content_md?: string; properties?: Record<string, unknown> },
+): Promise<NotePage> {
+  return request(`/api/v1/sessions/${sessionId}/pages`, json(body));
+}
+
+export function updateNotePage(
+  sessionId: string,
+  pageId: string,
+  body: { title?: string; icon?: string; content_md?: string; properties?: Record<string, unknown> },
+): Promise<NotePage> {
+  return request(`/api/v1/sessions/${sessionId}/pages/${pageId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+export function deleteNotePage(sessionId: string, pageId: string): Promise<{ deleted: boolean }> {
+  return request(`/api/v1/sessions/${sessionId}/pages/${pageId}`, { method: "DELETE" });
 }

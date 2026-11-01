@@ -62,6 +62,24 @@ class StudySession(SQLModel, table=True):
     cached_prefix_hash: Optional[str] = None
     total_tokens_cached: int = 0
     created_at: datetime = Field(default_factory=utcnow, index=True)
+    share_token: Optional[str] = Field(default=None, index=True)
+    is_public: bool = Field(default=False)
+    allow_duplicate: bool = Field(default=True)
+
+
+class NotePage(SQLModel, table=True):
+    __tablename__ = "note_page"
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    session_id: UUID = Field(foreign_key="study_session.id", ondelete="CASCADE", index=True)
+    parent_page_id: Optional[UUID] = Field(default=None, foreign_key="note_page.id", ondelete="CASCADE")
+    title: str = "Untitled"
+    icon: str = "📄"
+    page_type: str = "page"  # "page" or "database"
+    content_md: str = ""
+    properties: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
 
 
 class SessionNote(SQLModel, table=True):

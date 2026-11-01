@@ -26,6 +26,7 @@ function fmtDate(iso: string | null): string {
 export function Home({
   onOpen,
   onNotes,
+  onPages,
   onPurge,
   onNew,
   refreshToken,
@@ -34,6 +35,7 @@ export function Home({
 }: {
   onOpen: (session: SessionSummary) => void;
   onNotes: (session: SessionSummary) => void;
+  onPages: (session: SessionSummary) => void;
   onPurge: (session: SessionSummary) => void;
   onNew: () => void;
   refreshToken: number;
@@ -211,6 +213,9 @@ export function Home({
                   </button>
                   <button className="btn small" onClick={() => onNotes(s)}>
                     Notes
+                  </button>
+                  <button className="btn small" onClick={() => onPages(s)}>
+                    Pages
                   </button>
                   <span className="spacer" />
                   <button className="btn ghost small" onClick={() => onPurge(s)}>

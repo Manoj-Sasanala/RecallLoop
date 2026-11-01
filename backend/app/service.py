@@ -5,6 +5,7 @@ Routes stay thin; everything that touches the database or the model lives here.
 
 from __future__ import annotations
 
+import secrets
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -16,9 +17,11 @@ from app.grading import TopicMeta, behavior_persona, grade_exam, paced_time_limi
 from app.ingestion import ExtractedDocument, ExtractedPage, extract_pdf
 from app.llm import LLMClient
 from app.models import (
+    DiagnosticState,
     DocumentPage,
     ExamAttempt,
     ExamType,
+    NotePage,
     Question,
     QuestionAttempt,
     RelationshipType,
@@ -456,6 +459,353 @@ def save_notes(db: Session, session: StudySession, notes_md: str) -> dict:
         "notes_md": note.notes_md,
         "updated_at": note.updated_at.isoformat(),
     }
+
+
+def list_pages(db: Session, session: StudySession) -> list[dict]:
+    pages = db.exec(
+        select(NotePage)
+        .where(NotePage.session_id == session.id)
+        .order_by(NotePage.created_at)
+    ).all()
+
+    # Seed default pages if none exist yet
+    if not pages:
+        existing_note = db.get(SessionNote, session.id)
+        default_content = (
+            existing_note.notes_md
+            if existing_note and existing_note.notes_md.strip()
+            else (
+                f"# {session.title} — Working Notes\n\n"
+                "Use this space for core definitions, lecture takeaways, and personal mnemonics.\n\n"
+                "- Add new subpages on the left\n"
+                "- Track traps in the Misconceptions Database\n"
+            )
+        )
+        page1 = NotePage(
+            session_id=session.id,
+            title="General Study Notes",
+            icon="📄",
+            page_type="page",
+            content_md=default_content,
+        )
+        db.add(page1)
+        page2 = NotePage(
+            session_id=session.id,
+            title="Misconceptions & Traps Tracker",
+            icon="📊",
+            page_type="database",
+            content_md="",
+            properties={"view": "table", "filter": "all"},
+        )
+        db.add(page2)
+        db.commit()
+        db.refresh(page1)
+        db.refresh(page2)
+        pages = [page1, page2]
+
+    return [
+        {
+            "id": str(p.id),
+            "session_id": str(p.session_id),
+            "parent_page_id": str(p.parent_page_id) if p.parent_page_id else None,
+            "title": p.title,
+            "icon": p.icon,
+            "page_type": p.page_type,
+            "content_md": p.content_md,
+            "properties": p.properties or {},
+            "created_at": p.created_at.isoformat(),
+            "updated_at": p.updated_at.isoformat(),
+        }
+        for p in pages
+    ]
+
+
+def create_page(
+    db: Session,
+    session: StudySession,
+    title: str,
+    icon: str = "📄",
+    page_type: str = "page",
+    parent_page_id: UUID | None = None,
+    content_md: str = "",
+    properties: dict | None = None,
+) -> dict:
+    page = NotePage(
+        session_id=session.id,
+        parent_page_id=parent_page_id,
+        title=title or "Untitled",
+        icon=icon or "📄",
+        page_type=page_type,
+        content_md=content_md or "",
+        properties=properties or {},
+    )
+    db.add(page)
+    db.commit()
+    db.refresh(page)
+    return {
+        "id": str(page.id),
+        "session_id": str(page.session_id),
+        "parent_page_id": str(page.parent_page_id) if page.parent_page_id else None,
+        "title": page.title,
+        "icon": page.icon,
+        "page_type": page.page_type,
+        "content_md": page.content_md,
+        "properties": page.properties or {},
+        "created_at": page.created_at.isoformat(),
+        "updated_at": page.updated_at.isoformat(),
+    }
+
+
+def update_page(
+    db: Session,
+    session: StudySession,
+    page_id: UUID,
+    title: str | None = None,
+    icon: str | None = None,
+    content_md: str | None = None,
+    properties: dict | None = None,
+) -> dict:
+    page = db.get(NotePage, page_id)
+    if not page or page.session_id != session.id:
+        raise ValueError("Page not found")
+    if title is not None:
+        page.title = title
+    if icon is not None:
+        page.icon = icon
+    if content_md is not None:
+        page.content_md = content_md
+    if properties is not None:
+        page.properties = properties
+    page.updated_at = utcnow()
+    db.add(page)
+    db.commit()
+    db.refresh(page)
+    return {
+        "id": str(page.id),
+        "session_id": str(page.session_id),
+        "parent_page_id": str(page.parent_page_id) if page.parent_page_id else None,
+        "title": page.title,
+        "icon": page.icon,
+        "page_type": page.page_type,
+        "content_md": page.content_md,
+        "properties": page.properties or {},
+        "created_at": page.created_at.isoformat(),
+        "updated_at": page.updated_at.isoformat(),
+    }
+
+
+def delete_page(db: Session, session: StudySession, page_id: UUID) -> dict:
+    page = db.get(NotePage, page_id)
+    if not page or page.session_id != session.id:
+        raise ValueError("Page not found")
+    db.delete(page)
+    db.commit()
+    return {"deleted": True, "id": str(page_id)}
+
+
+def update_share_settings(
+    db: Session,
+    session: StudySession,
+    is_public: bool,
+    allow_duplicate: bool,
+) -> dict:
+    if not session.share_token:
+        session.share_token = secrets.token_urlsafe(12)
+    session.is_public = is_public
+    session.allow_duplicate = allow_duplicate
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+    return {
+        "session_id": str(session.id),
+        "share_token": session.share_token,
+        "is_public": session.is_public,
+        "allow_duplicate": session.allow_duplicate,
+    }
+
+
+def list_topics(db: Session, session: StudySession) -> list[dict]:
+    """Read-only topic ledger for shared views: blueprint plus latest mastery."""
+    topics = list(db.exec(select(Topic).where(Topic.session_id == session.id)))
+    latest: ExamAttempt | None = db.exec(
+        select(ExamAttempt)
+        .where(ExamAttempt.session_id == session.id)
+        .where(ExamAttempt.submitted_at.is_not(None))
+        .order_by(ExamAttempt.round_number.desc())
+    ).first()
+    snaps: dict = {}
+    if latest is not None:
+        for snap in db.exec(
+            select(TopicMasterySnapshot).where(TopicMasterySnapshot.exam_attempt_id == latest.id)
+        ):
+            snaps[snap.topic_id] = snap
+    out = []
+    for topic in topics:
+        snap = snaps.get(topic.id)
+        out.append(
+            {
+                "topic_id": str(topic.id),
+                "code": topic.code,
+                "title": topic.title,
+                "syllabus_weight": topic.syllabus_weight,
+                "out_degree": topic.out_degree,
+                "page_refs": topic.source_page_refs,
+                "raw_accuracy": snap.raw_accuracy if snap else None,
+                "mastery_score": snap.mastery_score if snap else None,
+                "vulnerability_score": snap.vulnerability_score if snap else None,
+                "is_flagged_weak": snap.is_flagged_weak if snap else False,
+                "trapped_misconceptions": list(snap.trapped_misconceptions_json) if snap else [],
+            }
+        )
+    return out
+
+
+def get_grade(db: Session, attempt: ExamAttempt) -> dict:
+    """Read-only grade report built from stored rows (never re-grades)."""
+    questions = {
+        q.id: q
+        for q in db.exec(select(Question).where(Question.exam_attempt_id == attempt.id))
+    }
+    graded_items = []
+    state_counts: dict[str, int] = {}
+    for qa in db.exec(select(QuestionAttempt).where(QuestionAttempt.exam_attempt_id == attempt.id)):
+        question = questions.get(qa.question_id)
+        if question is None:
+            continue
+        state = qa.diagnostic_state.value if isinstance(qa.diagnostic_state, DiagnosticState) else qa.diagnostic_state
+        state_counts[state] = state_counts.get(state, 0) + 1
+        graded_items.append(
+            {
+                "question_id": str(question.id),
+                "stem": question.question_stem,
+                "source_page_number": question.source_page_number,
+                "verbatim_source_quote": question.verbatim_source_quote,
+                "selected_option_id": qa.selected_option_id,
+                "is_correct": qa.is_correct,
+                "diagnostic_state": state,
+                "endorsed_misconception": qa.endorsed_misconception,
+            }
+        )
+    return {
+        "exam_attempt_id": str(attempt.id),
+        "summary": {
+            "raw_accuracy": attempt.raw_accuracy,
+            "mastery_score": attempt.mastery_score,
+            "mce_score": attempt.mce_score,
+            "lure_persistence_rate": attempt.lure_persistence_rate,
+            "state_counts": state_counts,
+        },
+        "graded_items": graded_items,
+    }
+
+
+def get_shared_session(db: Session, share_token: str) -> dict:
+    session = db.exec(
+        select(StudySession)
+        .where(StudySession.share_token == share_token)
+        .where(StudySession.is_public == True)  # noqa: E712
+    ).first()
+    if not session:
+        raise LookupError("Shared session not found or link has expired.")
+
+    topics = list_topics(db, session)
+
+    attempts = db.exec(
+        select(ExamAttempt)
+        .where(ExamAttempt.session_id == session.id)
+        .where(ExamAttempt.submitted_at.is_not(None))
+        .order_by(ExamAttempt.round_number.desc())
+    ).all()
+    latest_grade = None
+    if attempts:
+        try:
+            latest_grade = get_grade(db, attempts[0])
+        except Exception:
+            latest_grade = None
+
+    pages = list_pages(db, session)
+
+    return {
+        "session": {
+            "session_id": str(session.id),
+            "title": session.title,
+            "course_code": session.course_code,
+            "status": session.status,
+            "created_at": session.created_at.isoformat(),
+            "share_token": session.share_token,
+            "allow_duplicate": session.allow_duplicate,
+        },
+        "topics": topics,
+        "grade": latest_grade,
+        "pages": pages,
+    }
+
+
+def duplicate_shared_session(db: Session, share_token: str, new_title: str | None = None) -> StudySession:
+    source_session = db.exec(
+        select(StudySession)
+        .where(StudySession.share_token == share_token)
+        .where(StudySession.is_public == True)  # noqa: E712
+    ).first()
+    if not source_session:
+        raise LookupError("Shared session not found.")
+    if not source_session.allow_duplicate:
+        raise ValueError("This session does not permit duplication.")
+
+    title = new_title or f"{source_session.title} (Cloned)"
+    cloned = StudySession(
+        title=title,
+        course_code=source_session.course_code,
+        status=source_session.status,
+    )
+    db.add(cloned)
+    db.commit()
+    db.refresh(cloned)
+
+    source_topics = db.exec(select(Topic).where(Topic.session_id == source_session.id)).all()
+    topic_map = {}
+    for t in source_topics:
+        new_t = Topic(
+            session_id=cloned.id,
+            code=t.code,
+            title=t.title,
+            description=t.description,
+            syllabus_weight=t.syllabus_weight,
+            source_page_refs=t.source_page_refs,
+            out_degree=t.out_degree,
+        )
+        db.add(new_t)
+        db.commit()
+        db.refresh(new_t)
+        topic_map[t.id] = new_t.id
+
+    source_edges = db.exec(select(TopicEdge).where(TopicEdge.session_id == source_session.id)).all()
+    for e in source_edges:
+        if e.prerequisite_topic_id in topic_map and e.dependent_topic_id in topic_map:
+            new_e = TopicEdge(
+                session_id=cloned.id,
+                prerequisite_topic_id=topic_map[e.prerequisite_topic_id],
+                dependent_topic_id=topic_map[e.dependent_topic_id],
+                relationship_type=e.relationship_type,
+                rationale=e.rationale,
+            )
+            db.add(new_e)
+
+    source_pages = db.exec(select(NotePage).where(NotePage.session_id == source_session.id)).all()
+    for p in source_pages:
+        new_p = NotePage(
+            session_id=cloned.id,
+            title=p.title,
+            icon=p.icon,
+            page_type=p.page_type,
+            content_md=p.content_md,
+            properties=p.properties,
+        )
+        db.add(new_p)
+
+    db.commit()
+    db.refresh(cloned)
+    return cloned
 
 
 STAGES = ("HALF_1", "HALF_2", "FULL")

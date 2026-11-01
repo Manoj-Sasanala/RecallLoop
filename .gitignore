@@ -20,5 +20,12 @@ node_modules/
 dist/
 *.tsbuildinfo
 
+# graph analysis output (regenerable via graphify)
+graphify-out/
+
+# playwright e2e artifacts
+frontend/playwright-report/
+frontend/test-results/
+
 # internal spec doc (not part of the submission)
 RecallLoop Architecture and PRD.md

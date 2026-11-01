@@ -18,6 +18,7 @@ from sqlmodel import select
 
 from app import service
 from app.db import init_db, make_engine
+from app.ingestion import MAX_BYTES
 from app.llm import client_from_env
 from app.models import DocumentPage, ExamAttempt, SourceDocument, StudySession, Topic, TopicEdge
 
@@ -62,6 +63,31 @@ class PlanRequest(BaseModel):
     stage: str = "FULL"
 
 
+class CreatePageRequest(BaseModel):
+    title: str = "Untitled"
+    icon: str = "📄"
+    page_type: str = "page"
+    parent_page_id: UUID | None = None
+    content_md: str = ""
+    properties: dict = {}
+
+
+class UpdatePageRequest(BaseModel):
+    title: str | None = None
+    icon: str | None = None
+    content_md: str | None = None
+    properties: dict | None = None
+
+
+class ShareRequest(BaseModel):
+    is_public: bool = True
+    allow_duplicate: bool = True
+
+
+class DuplicateRequest(BaseModel):
+    new_title: str | None = None
+
+
 def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
@@ -74,6 +100,9 @@ def _session_out(session: StudySession) -> dict:
         "status": session.status,
         "demo_bundle_id": session.demo_bundle_id,
         "created_at": session.created_at.isoformat(),
+        "share_token": session.share_token,
+        "is_public": session.is_public,
+        "allow_duplicate": session.allow_duplicate,
     }
 
 
@@ -136,6 +165,56 @@ def create_app(engine=None, client=None) -> FastAPI:
     def write_notes(session_id: UUID, body: NotesRequest, db: DBSession = Depends(db_dep)):
         return service.save_notes(db, service.get_session(db, session_id), body.notes_md)
 
+    @app.get("/api/v1/sessions/{session_id}/pages")
+    def list_session_pages(session_id: UUID, db: DBSession = Depends(db_dep)):
+        return {"pages": service.list_pages(db, service.get_session(db, session_id))}
+
+    @app.post("/api/v1/sessions/{session_id}/pages")
+    def create_session_page(session_id: UUID, body: CreatePageRequest, db: DBSession = Depends(db_dep)):
+        return service.create_page(
+            db,
+            service.get_session(db, session_id),
+            title=body.title,
+            icon=body.icon,
+            page_type=body.page_type,
+            parent_page_id=body.parent_page_id,
+            content_md=body.content_md,
+            properties=body.properties,
+        )
+
+    @app.get("/api/v1/sessions/{session_id}/pages/{page_id}")
+    def get_session_page(session_id: UUID, page_id: UUID, db: DBSession = Depends(db_dep)):
+        return service.get_page(db, service.get_session(db, session_id), page_id)
+
+    @app.put("/api/v1/sessions/{session_id}/pages/{page_id}")
+    def update_session_page(session_id: UUID, page_id: UUID, body: UpdatePageRequest, db: DBSession = Depends(db_dep)):
+        return service.update_page(
+            db,
+            service.get_session(db, session_id),
+            page_id=page_id,
+            title=body.title,
+            icon=body.icon,
+            content_md=body.content_md,
+            properties=body.properties,
+        )
+
+    @app.delete("/api/v1/sessions/{session_id}/pages/{page_id}")
+    def delete_session_page(session_id: UUID, page_id: UUID, db: DBSession = Depends(db_dep)):
+        return service.delete_page(db, service.get_session(db, session_id), page_id)
+
+    @app.post("/api/v1/sessions/{session_id}/share")
+    def update_session_share(session_id: UUID, body: ShareRequest, db: DBSession = Depends(db_dep)):
+        return service.update_share_settings(db, service.get_session(db, session_id), body.is_public, body.allow_duplicate)
+
+    @app.get("/api/v1/share/{share_token}")
+    def get_shared(share_token: str, db: DBSession = Depends(db_dep)):
+        return service.get_shared_session(db, share_token)
+
+    @app.post("/api/v1/share/{share_token}/duplicate")
+    def duplicate_shared(share_token: str, body: DuplicateRequest, db: DBSession = Depends(db_dep)):
+        cloned = service.duplicate_shared_session(db, share_token, body.new_title)
+        return _session_out(cloned)
+
     @app.get("/api/v1/sessions/{session_id}/plan")
     def read_plan(session_id: UUID, db: DBSession = Depends(db_dep)):
         return service.get_plan(db, service.get_session(db, session_id))
@@ -150,7 +229,8 @@ def create_app(engine=None, client=None) -> FastAPI:
 
     @app.post("/api/v1/speech/transcribe", status_code=200)
     async def transcribe_speech(audio: UploadFile = File(...), prompt: str | None = Form(None)):
-        data = await audio.read()
+        # Bounded read: never buffer more than the cap plus one probe byte.
+        data = await audio.read(10 * 1024 * 1024 + 1)
         if not data:
             raise ValueError("empty audio upload")
         if len(data) > 10 * 1024 * 1024:
@@ -167,7 +247,13 @@ def create_app(engine=None, client=None) -> FastAPI:
         session = service.get_session(db, session_id)
         if len(files) != len(doc_roles):
             raise ValueError("one doc_role per file is required")
-        uploads = [(upload.filename or "document.pdf", await upload.read(), role) for upload, role in zip(files, doc_roles)]
+        uploads = []
+        for upload, role in zip(files, doc_roles):
+            # Bounded read: reject oversize payloads without buffering them fully.
+            data = await upload.read(MAX_BYTES + 1)
+            if len(data) > MAX_BYTES:
+                raise ValueError(f"file exceeds {MAX_BYTES // (1024 * 1024)} MB")
+            uploads.append((upload.filename or "document.pdf", data, role))
         documents = service.add_documents(db, session, uploads)
         payload = []
         for document in documents:

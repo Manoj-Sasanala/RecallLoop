@@ -166,3 +166,16 @@ export type PagePayload = {
   highlight_char_spans: { start: number; end: number }[];
   page_image_b64: string | null;
 };
+
+export type NotePage = {
+  id: string;
+  session_id: string;
+  parent_page_id: string | null;
+  title: string;
+  icon: string;
+  page_type: string;
+  content_md: string;
+  properties: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};

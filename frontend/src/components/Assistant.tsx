@@ -25,6 +25,7 @@ export type AssistantActions = {
   goHome: () => void;
   openSession: (id: string) => void;
   openNotes: () => void;
+  openPages: () => void;
   purgeCurrent: () => void;
   purgeSession: (id: string, title: string) => void;
   appendNote: (text: string) => void;
@@ -283,17 +284,22 @@ function handleCommand(query: string, ctx: AssistantContext, actions: AssistantA
     return { reply: "Starting a fresh session — upload a PDF or pick a demo course.", action: () => actions.navigateView?.("setup") };
   }
 
+  if (/\bnotes?\b/.test(q) && /\b(open|show|write)\b/.test(q)) {
+    if (!ctx.sessionTitle) return { reply: "Open a session first, then I will take you to its notes." };
+    return { reply: "Opening your notes.", action: actions.openNotes };
+  }
+
+  if (/\bpages?\b/.test(q) && /\b(open|show|write)\b/.test(q)) {
+    if (!ctx.sessionTitle) return { reply: "Open a session first, then I will take you to its pages." };
+    return { reply: "Opening your pages.", action: actions.openPages };
+  }
+
   const openMatch = q.match(/(?:open|show|load)\s+(.+)/);
   if (openMatch) {
     if (ctx.sessions === null) return { reply: "Still loading your sessions — ask again in a moment." };
     const target = findSession(ctx, openMatch[1]);
     if (target) return { reply: `Opening ${target.title}.`, action: () => actions.openSession(target.id) };
     return { reply: `I cannot find that. Your sessions: ${uniqueTitles(ctx.sessions) || "none yet"}.` };
-  }
-
-  if (/\bnotes?\b/.test(q) && /\b(open|show|write)\b/.test(q)) {
-    if (!ctx.sessionTitle) return { reply: "Open a session first, then I will take you to its notes." };
-    return { reply: "Opening your notes.", action: actions.openNotes };
   }
 
   const deleteMatch = q.match(/(?:delete|purge|remove|clear)\s+(.+)/);
@@ -365,7 +371,7 @@ function handleCommand(query: string, ctx: AssistantContext, actions: AssistantA
   if (/\b(help|what can you|commands)\b/.test(q)) {
     return {
       reply:
-        "I can navigate your entire study loop. Try asking: 'show mastery board', 'open knowledge graph', 'show weak topics', 'what are my topics', 'note down [idea]', or 'take exam'. Say stop anytime to interrupt me.",
+        "I can navigate your entire study loop. Try asking: 'show mastery board', 'open knowledge graph', 'show weak topics', 'what are my topics', 'open pages', 'note down [idea]', or 'take exam'. Say stop anytime to interrupt me.",
     };
   }
 
@@ -380,7 +386,7 @@ function handleCommand(query: string, ctx: AssistantContext, actions: AssistantA
   }
 
   return {
-    reply: `I heard "${query}". You can ask me to open the Mastery Board, view the Knowledge Graph, check weak topics, or take notes.`,
+    reply: `I heard "${query}". You can ask me to open the Mastery Board, view the Knowledge Graph, check weak topics, open pages, or take notes.`,
   };
 }
 
@@ -408,6 +414,7 @@ export function Assistant({
   const lastAskedRef = useRef<{ text: string; at: number }>({ text: "", at: 0 });
   const liveRef = useRef(false);
   const speakingRef = useRef(false);
+  const speakGenRef = useRef(0);
   const lastSpokenRef = useRef("");
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const contextRef = useRef(context);
@@ -448,29 +455,38 @@ export function Assistant({
   };
 
   // Restart live listening after speech ends. The mic is paused while
-  // Jarvis speaks, so resume needs a fresh stream.
-  const resumeLiveAfterSpeech = () => {
+  // Jarvis speaks, so resume needs a fresh stream. A short settle delay
+  // lets room tail decay before the mic goes live again.
+  const resumeLiveAfterSpeech = (speakGeneration: number) => {
     if (!liveRef.current) return;
-    void (async () => {
-      const stream = await requestMic();
-      if (!liveRef.current || !stream) return;
-      try {
-        stopRef.current = await startLoop(stream, {
-          onSegment: ({ blob, seconds }) => void handleSegment(blob, "live", seconds),
-          onLevel: (v) => setMicLevel(Math.min(1, v * 4)),
-          onError: (message) => {
-            liveRef.current = false;
-            setListening(false);
-            setMicLevel(0);
-            setLog((cur) => [...cur, { who: "jarvis", text: message }]);
-          },
-        });
-        setListening(true);
-      } catch {
-        liveRef.current = false;
-        setListening(false);
-      }
-    })();
+    window.setTimeout(() => {
+      if (!liveRef.current) return;
+      if (speakGeneration !== speakGenRef.current) return;
+      void (async () => {
+        const stream = await requestMic();
+        if (!liveRef.current || !stream) return;
+        if (speakGeneration !== speakGenRef.current) {
+          stream.getTracks().forEach((t) => { try { t.stop(); } catch { /* noop */ } });
+          return;
+        }
+        try {
+          stopRef.current = await startLoop(stream, {
+            onSegment: ({ blob, seconds }) => void handleSegment(blob, "live", seconds),
+            onLevel: (v) => setMicLevel(Math.min(1, v * 4)),
+            onError: (message) => {
+              liveRef.current = false;
+              setListening(false);
+              setMicLevel(0);
+              setLog((cur) => [...cur, { who: "jarvis", text: message }]);
+            },
+          });
+          setListening(true);
+        } catch {
+          liveRef.current = false;
+          setListening(false);
+        }
+      })();
+    }, 600);
   };
 
   const speak = (text: string) => {
@@ -486,6 +502,8 @@ export function Assistant({
       setListening(false);
       setMicLevel(0);
       speakingRef.current = true;
+      const generation = speakGenRef.current + 1;
+      speakGenRef.current = generation;
       setSpeaking(true);
       lastSpokenRef.current = text.toLowerCase();
       window.speechSynthesis.cancel();
@@ -495,7 +513,7 @@ export function Assistant({
         speakingRef.current = false;
         setSpeaking(false);
         lastSpokeEndRef.current = Date.now();
-        resumeLiveAfterSpeech();
+        resumeLiveAfterSpeech(generation);
       };
       window.speechSynthesis.speak(utterance);
     } catch {
@@ -561,8 +579,9 @@ export function Assistant({
   };
 
   // Echo of our own voice picked up by the mic: same words as what Jarvis
-  // just said, in the same order. Applies while speaking AND for a few
-  // seconds after (room tail), so the reply can never trigger itself.
+  // just said, in the same order. Applies while speaking AND for a while
+  // after (room tail + transcribe latency), so the reply can never trigger itself.
+  const ECHO_TAIL_MS = 12000;
   const isOwnEcho = (heardText: string): boolean => {
     const said = lastSpokenRef.current;
     if (!said) return false;
@@ -575,6 +594,11 @@ export function Assistant({
     const heard = norm(heardText);
     const spoken = norm(said);
     if (heard.length === 0) return true;
+    // Verbatim fast path: heard text is (nearly) contained in what we just
+    // said — always an echo, regardless of timing.
+    const joinedSpoken = ` ${spoken.join(" ")} `;
+    const joinedHeard = heard.join(" ");
+    if (joinedHeard.length >= 12 && joinedSpoken.includes(joinedHeard)) return true;
     const spokenSet = new Set(spoken);
     const overlap = heard.filter((w) => spokenSet.has(w)).length;
     if (overlap / heard.length < 0.6) return false;
@@ -654,7 +678,8 @@ export function Assistant({
       return;
     }
     // Room-tail echo: our own reply arriving just after speech ended.
-    if (!speakingRef.current && Date.now() - lastSpokeEndRef.current < 3000 && isOwnEcho(text)) {
+    // Window covers silence-detect + transcription latency (~5-10s).
+    if (!speakingRef.current && Date.now() - lastSpokeEndRef.current < ECHO_TAIL_MS && isOwnEcho(text)) {
       return;
     }
     if (heardWhileSpeaking(text)) ask(text);
