@@ -163,8 +163,8 @@ function handleCommand(query: string, ctx: AssistantContext, actions: AssistantA
   }
 
   // --- Exam / Test ---
-  if (/\b(start|take|generate|begin)\s+(an?\s+)?(exam|test|quiz)\b/.test(q) || q === "start exam" || q === "take exam") {
-    if (!ctx.sessionTitle) return { reply: "Open a session first, then I will start its exam." };
+  if (/(?:start|take|generate|begin|run|launch)\s+(?:an?\s+|the\s+|this\s+|that\s+|my\s+)?(exam|test|quiz)\b/.test(q) || q === "start exam" || q === "take exam") {
+    if (!ctx.sessionTitle || !ctx.hasTopics) return { reply: "Open a session first, then I will start its exam." };
     return {
       reply: "Starting your exam session.",
       action: () => {
