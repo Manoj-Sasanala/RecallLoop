@@ -9,7 +9,7 @@
   "background": { "service_worker": "service-worker.js", "type": "module" },
   "options_page": "options.html",
   "permissions": ["sidePanel", "storage", "activeTab", "scripting", "tabs", "alarms", "notifications", "offscreen"],
-  "host_permissions": [],
+  "host_permissions": ["https://api.llama.com/*"],
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' https://api.llama.com https://api.meta.com"
   }

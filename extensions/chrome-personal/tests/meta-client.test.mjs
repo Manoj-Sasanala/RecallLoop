@@ -15,8 +15,18 @@ test('parseAction picks first valid action from chatty reply', () => {
   assert.equal(r.tool, 'read');
 });
 
+test('parseAction handles nested braces in text', () => {
+  const r = parseAction('do {"tool":"type","ref":"ref_2","text":"say {hello} now"} please');
+  assert.deepEqual(r, { tool: 'type', ref: 'ref_2', text: 'say {hello} now' });
+});
+
 test('chatAction errors when key is missing', async () => {
   await assert.rejects(() => chatAction({ baseUrl: 'https://x', key: '', model: 'm', messages: [] }), /missing Meta API key/);
+});
+
+test('chatAction surfaces unknown tool instead of silent stop', async () => {
+  const stub = async () => ({ ok: true, json: async () => ({ choices: [{ message: { content: '{"tool":"launch_missiles"}' } }] }) });
+  await assert.rejects(() => chatAction({ baseUrl: 'https://x', key: 'k', model: 'm', messages: [], fetchImpl: stub }), /unknown action/);
 });
 
 test('chatAction returns parsed action from stubbed fetch', async () => {

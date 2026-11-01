@@ -1,4 +1,4 @@
-const CORE = new Set(['navigate', 'read', 'click', 'type', 'scroll', 'js', 'screenshot', 'stop']);
+const CORE = new Set(['navigate', 'read', 'click', 'type', 'scroll', 'screenshot', 'stop']);
 
 export function isSystemPage(url = '') {
   return /^(chrome:\/\/|chrome-extension:\/\/|about:|edge:\/\/|devtools:\/\/|chrome-untrusted:\/\/|view-source:)/.test(url) ||
@@ -11,6 +11,7 @@ export function validateAction(a, { url = '' } = {}) {
   if (a.tool === 'click' && !a.ref) throw new Error('click requires ref');
   if (a.tool === 'type' && (!a.ref || a.text == null)) throw new Error('type requires ref + text');
   if (a.tool === 'navigate' && !a.url) throw new Error('navigate requires url');
+  if (a.tool === 'navigate' && !/^https?:\/\//.test(a.url)) throw new Error('navigate requires http(s) url');
   if (a.tool === 'js' && !a.code) throw new Error('js requires code');
   return true;
 }

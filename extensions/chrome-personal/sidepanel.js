@@ -27,10 +27,10 @@ chrome.runtime.onMessage.addListener((m) => {
     p.textContent = 'Approve this page action? ' + m.message;
     const ok = document.createElement('button');
     ok.textContent = 'Approve once';
-    ok.onclick = () => { chrome.runtime.sendMessage({ type: 'TASK_APPROVE', action: pendingAction }); confirmBox.style.display = 'none'; log('Approved: ' + m.message); };
+    ok.onclick = () => { ok.disabled = true; no.disabled = true; chrome.runtime.sendMessage({ type: 'TASK_APPROVE', action: pendingAction }); confirmBox.style.display = 'none'; log('Approved: ' + m.message); };
     const no = document.createElement('button');
     no.textContent = 'Deny';
-    no.onclick = () => { chrome.runtime.sendMessage({ type: 'TASK_DENY' }); confirmBox.style.display = 'none'; log('Denied.'); };
+    no.onclick = () => { ok.disabled = true; no.disabled = true; chrome.runtime.sendMessage({ type: 'TASK_DENY' }); confirmBox.style.display = 'none'; log('Denied.'); };
     confirmBox.append(p, ok, no);
   }
 });

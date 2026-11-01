@@ -12,6 +12,8 @@ if (!mf.side_panel?.default_path) fail('side_panel.default_path missing');
 if (mf.background?.service_worker == null) fail('background.service_worker missing');
 const allowed = new Set(['sidePanel','storage','activeTab','scripting','tabs','alarms','notifications','offscreen']);
 for (const p of (mf.permissions || [])) if (!allowed.has(p)) fail('permission not allowed for v1: ' + p);
+// SW fetch() to the Meta endpoint needs an explicit host permission in MV3.
+if (!((mf.host_permissions || []).some((h) => h.includes('api.llama.com')))) fail('host_permissions must cover the Meta API host');
 if (!existsSync(join(root, 'options.html'))) fail('options.html missing');
 if (!existsSync(join(root, 'options.js'))) fail('options.js missing');
 const opt = readFileSync(join(root, 'options.js'), 'utf8');

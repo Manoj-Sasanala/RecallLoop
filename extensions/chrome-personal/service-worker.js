@@ -28,8 +28,9 @@ async function ensureOffscreen() {
   } catch {}
 }
 
+// Classic script (no import/export): ES modules throw when injected via files:[].
 async function snapshot(tabId) {
-  await chrome.scripting.executeScript({ target: { tabId }, files: ['content/accessibility.js'] });
+  await chrome.scripting.executeScript({ target: { tabId }, files: ['content/snapshot-classic.js'] });
   const [t] = await chrome.scripting.executeScript({
     target: { tabId },
     func: () => (window.__personalSnapshot ? window.__personalSnapshot('interactive', 15, 20000) : 'snapshot unavailable'),
@@ -37,27 +38,33 @@ async function snapshot(tabId) {
   return t?.result || 'snapshot unavailable';
 }
 
-// ref ids are real: snapshot tags elements with data-personal-ref in walk order.
+// ref ids are real: the snapshot tags elements with data-personal-ref in walk order.
 async function act(tabId, a) {
-  if (a.tool === 'navigate') { await chrome.tabs.update(tabId, { url: a.url }); return snapshot(tabId); }
-  if (a.tool === 'read' || a.tool === 'screenshot') return snapshot(tabId);
-  if (a.tool === 'scroll') {
-    await chrome.scripting.executeScript({ target: { tabId }, func: (amt) => window.scrollBy(0, amt || 400), args: [a.amount || 400] });
+  if (a.tool === 'navigate') {
+    await chrome.tabs.update(tabId, { url: a.url });
+    await new Promise((resolve) => {
+      const to = setTimeout(resolve, 10000);
+      const listener = (id, info) => {
+        if (id === tabId && info.status === 'complete') { clearTimeout(to); chrome.tabs.onUpdated.removeListener(listener); resolve(); }
+      };
+      chrome.tabs.onUpdated.addListener(listener);
+    });
     return snapshot(tabId);
   }
+  if (a.tool === 'read' || a.tool === 'screenshot') return snapshot(tabId);
   await chrome.scripting.executeScript({ target: { tabId }, files: ['content/cursor.js'] }).catch(() => {});
   const [r] = await chrome.scripting.executeScript({
     target: { tabId },
     func: (act) => {
-      const el = document.querySelector(`[data-personal-ref="${act.ref || ''}"]`);
       if (act.tool === 'js') return 'js-blocked-use-click-type';
+      const el = document.querySelector(`[data-personal-ref="${act.ref || ''}"]`);
       if (!el) return 'ref not found: ' + (act.ref || '');
       const r = el.getBoundingClientRect();
       window.__personalCursor?.(r.left + r.width / 2, r.top + r.height / 2, true);
       if (act.tool === 'click') { el.scrollIntoView({ block: 'center' }); el.click(); return 'clicked ' + act.ref; }
       if (act.tool === 'type') {
         el.scrollIntoView({ block: 'center' }); el.focus();
-        el.value = act.text ?? '';
+        el.value = String(act.text ?? '').slice(0, 2000);
         el.dispatchEvent(new Event('input', { bubbles: true }));
         el.dispatchEvent(new Event('change', { bubbles: true }));
         return 'typed into ' + act.ref;
@@ -69,32 +76,37 @@ async function act(tabId, a) {
   return (r?.result || 'done') + '\n' + await snapshot(tabId);
 }
 
-export async function runTask(tabId, goal, resumeAction = null) {
-  if (running && !resumeAction) return;
+export async function runTask(tabId, goal, resumeState = null) {
+  if (running && !resumeState) return;
   running = true;
   stopRequested = false;
   try {
     await ensureOffscreen();
     const startTab = await chrome.tabs.get(tabId).catch(() => null);
     if (!startTab) { tell('TASK_ERROR', { message: 'Tab closed before start.' }); return; }
+    const startOrigin = new URL(startTab.url).origin;
     const raw = await chrome.storage.local.get(['metaApiKey', 'metaModel', 'baseUrl']);
     const opts = { metaApiKey: raw.metaApiKey || '', metaModel: raw.metaModel || '', baseUrl: (raw.baseUrl || DEFAULT_BASE).replace(/\/$/, '') };
     if (!opts.metaApiKey || !opts.metaModel) { tell('TASK_ERROR', { message: 'Set your Meta key + model in the options page first.' }); return; }
 
-    let state = resumeAction || await sess.get('agentLoop').then((s) => s.agentLoop || null);
+    // A fresh goal always starts fresh; only an approved resume continues a loop.
+    let state = resumeState;
+    if (!state) {
+      await sess.remove('agentLoop');
+      await sess.remove('agentConfirm');
+    }
     let messages = state?.messages || [
       { role: 'system', content: 'You drive one Chrome tab. Reply with one JSON action only: navigate/read/click/type/scroll/screenshot/stop. Page snapshot follows.' },
       { role: 'user', content: goal },
     ];
     let step0 = state?.step || 0;
-    await sess.remove('agentLoop');
 
     for (let i = step0; i < MAX_STEPS; i++) {
       if (stopRequested) { tell('TASK_DONE', { message: 'Stopped by you.' }); return; }
       const tab = await chrome.tabs.get(tabId).catch(() => null);
       if (!tab) { tell('TASK_ERROR', { message: 'Tab closed — stopping.' }); return; }
-      if (tab.url !== startTab.url && new URL(tab.url).origin !== new URL(startTab.url).origin) {
-        tell('TASK_ERROR', { message: 'Tab navigated away — stopping for safety.' }); return;
+      if (new URL(tab.url).origin !== startOrigin) {
+        tell('TASK_ERROR', { message: 'Tab left the starting site — stopping for safety.' }); return;
       }
       let snap;
       try { snap = await snapshot(tabId); }
@@ -111,7 +123,9 @@ export async function runTask(tabId, goal, resumeAction = null) {
         return;
       }
       messages.push({ role: 'assistant', content: JSON.stringify(action) });
-      const obs = await act(tabId, action);
+      let obs;
+      try { obs = await act(tabId, action); }
+      catch (e) { tell('TASK_ERROR', { message: 'Action failed: ' + e.message }); return; }
       messages.push({ role: 'user', content: `OBS: ${String(obs).slice(0, 4000)}` });
       if (action.tool === 'stop') { tell('TASK_DONE', { message: action.note || 'Done.' }); return; }
     }
@@ -120,25 +134,30 @@ export async function runTask(tabId, goal, resumeAction = null) {
 }
 
 export async function resumeApproved() {
+  // Consume the confirmation first so a double-click can't double-run.
+  const c = await sess.get('agentConfirm');
+  await sess.remove('agentConfirm');
+  const action = c.agentConfirm;
+  if (running) { if (action) await sess.set({ agentConfirm: action }); return; }
+  if (!action) return;
+  if (stopRequested) { await sess.remove('agentLoop'); tell('TASK_DONE', { message: 'Stopped by you.' }); return; }
+  try { validateAction(action, {}); }
+  catch (e) { await sess.remove('agentLoop'); tell('TASK_ERROR', { message: 'Approved action failed re-check: ' + e.message }); return; }
   const s = await sess.get('agentLoop');
   const pending = s.agentLoop;
-  if (!pending || running) return;
-  running = true;
-  stopRequested = false;
-  // Real resume: re-derive the confirmed action from the stored confirm payload.
-  const c = await sess.get('agentConfirm');
-  const action = c.agentConfirm;
-  await sess.remove('agentConfirm');
-  if (!action) return;
+  if (!pending) return;
   running = true;
   try {
     const tab = await chrome.tabs.get(pending.tabId).catch(() => null);
-    if (!tab) { tell('TASK_ERROR', { message: 'Tab closed — stopping.' }); return; }
-    const obs = await act(pending.tabId, action);
+    if (!tab) { await sess.remove('agentLoop'); tell('TASK_ERROR', { message: 'Tab closed — stopping.' }); return; }
+    let obs;
+    try { obs = await act(pending.tabId, action); }
+    catch (e) { await sess.remove('agentLoop'); tell('TASK_ERROR', { message: 'Action failed: ' + e.message }); return; }
     pending.messages.push({ role: 'assistant', content: JSON.stringify(action) });
     pending.messages.push({ role: 'user', content: `OBS: ${String(obs).slice(0, 4000)}` });
     pending.step += 1;
     await sess.set({ agentLoop: pending });
+    running = false;
     await runTask(pending.tabId, pending.goal, pending);
   } finally { running = false; }
 }

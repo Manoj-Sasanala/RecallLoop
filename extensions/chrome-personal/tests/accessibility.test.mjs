@@ -25,6 +25,16 @@ test('snapshot redacts password and sensitive inputs', () => {
   assert.match(r.tree, /\[redacted\]/);
 });
 
+test('snapshot redacts card-like digits and sensitive ids', () => {
+  const root = el('DIV', {}, [
+    el('INPUT', { id: 'cc-number', autocomplete: 'cc-number' }),
+    el('BUTTON', {}, [], 'Pay •••• 4242'),
+  ]);
+  const r = snapshotFromNode(root, { maxChars: 50000 });
+  assert.doesNotMatch(r.tree, /4242/);
+  assert.match(r.tree, /\[redacted\]/);
+});
+
 test('snapshot respects maxChars with truncation note', () => {
   const root = el('DIV', {}, [el('BUTTON', {}, [], 'A'.repeat(100))]);
   const r = snapshotFromNode(root, { maxChars: 40 });

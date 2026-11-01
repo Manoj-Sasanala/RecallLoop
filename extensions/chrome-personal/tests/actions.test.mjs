@@ -16,8 +16,14 @@ test('validateAction rejects unknown tool', () => {
 test('validateAction requires params per tool', () => {
   assert.throws(() => validateAction({ tool: 'click' }), /ref/);
   assert.throws(() => validateAction({ tool: 'navigate' }), /url/);
-  assert.throws(() => validateAction({ tool: 'js', }), /code/);
+  assert.throws(() => validateAction({ tool: 'js', code: 'x' }), /unknown tool/);
   assert.throws(() => validateAction({ tool: 'type', ref: 'ref_1' }), /text/);
+});
+
+test('validateAction rejects non-http navigate targets', () => {
+  assert.throws(() => validateAction({ tool: 'navigate', url: 'javascript:alert(1)' }), /http\(s\)/);
+  assert.throws(() => validateAction({ tool: 'navigate', url: 'data:text/html,x' }), /http\(s\)/);
+  validateAction({ tool: 'navigate', url: 'https://example.com' });
 });
 
 test('needsConfirm asks every sensitive action even on approved domains', () => {
