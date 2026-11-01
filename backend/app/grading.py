@@ -151,6 +151,76 @@ def vulnerability(mastery: float, syllabus_weight: float, out_degree: int) -> fl
     return (1.0 - mastery) * weight * (1.0 + 0.25 * out_degree)
 
 
+def paced_time_limit(
+    word_counts: Sequence[int],
+    per_item_buffer_s: int = 20,
+    wpm: int = 150,
+    minimum_s: int = 120,
+) -> int:
+    """Cognitive pacing clock: Understand-rate reading + retrieval buffer/item.
+
+    150 WPM for stems/options, 20s per item for retrieval + confidence judgment.
+    """
+    total = sum(max(0, w) for w in word_counts)
+    return max(minimum_s, round(total / (wpm / 60) + per_item_buffer_s * len(word_counts)))
+
+
+def behavior_persona(
+    items: Sequence[GradedItem],
+    weak_topic_ids: Iterable[UUID] = (),
+    edges: Iterable[tuple[UUID, UUID]] = (),
+) -> dict:
+    """Deterministic failure-mode label from telemetry (no model).
+
+    Priority: prerequisite cascade > impulsive lure > slow gap > fragile
+    guessing > steady. Thresholds are documented, not tuned.
+    """
+    items = list(items)
+    weak = set(weak_topic_ids)
+    lure_fast = [
+        i
+        for i in items
+        if i.diagnostic_state is DiagnosticState.LURE_ENTRAPMENT and i.time_spent_ms < 8000
+    ]
+    slow_gap = [
+        i
+        for i in items
+        if i.diagnostic_state is DiagnosticState.RECOGNIZED_GAP and i.time_spent_ms > 45000
+    ]
+    fragile = [i for i in items if i.diagnostic_state is DiagnosticState.FRAGILE_GUESS]
+
+    cascade = [
+        (pre, dep)
+        for pre, dep in edges
+        if pre in weak and dep in weak and pre != dep
+    ]
+    if cascade:
+        return {
+            "persona": "PREREQUISITE_BOTTLENECK",
+            "detail": "Downstream and upstream topics both weak: fix the prerequisite first.",
+            "counts": {"cascade_pairs": len(cascade)},
+        }
+    if lure_fast:
+        return {
+            "persona": "IMPULSIVE_MISCONCEPTION",
+            "detail": f"{len(lure_fast)} confident wrong answer(s) under 8s: slow down, read the qualifier.",
+            "counts": {"fast_lures": len(lure_fast)},
+        }
+    if slow_gap:
+        return {
+            "persona": "SCHEMA_DEFICIT",
+            "detail": f"{len(slow_gap)} slow, unsure miss(es): build the schema with the worked example first.",
+            "counts": {"slow_gaps": len(slow_gap)},
+        }
+    if items and len(fragile) / len(items) >= 0.3:
+        return {
+            "persona": "UNCALIBRATED_GUESSER",
+            "detail": f"{len(fragile)}/{len(items)} correct-but-unsure: lucky guesses that will decay.",
+            "counts": {"fragile": len(fragile)},
+        }
+    return {"persona": "STEADY", "detail": "No dominant failure pattern.", "counts": {}}
+
+
 def grade_exam(
     questions: Iterable[Question],
     responses: Iterable[Response],

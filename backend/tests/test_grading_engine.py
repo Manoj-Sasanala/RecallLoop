@@ -2,7 +2,7 @@ from uuid import uuid4
 
 import pytest
 
-from app.grading import Response, TopicMeta, grade_exam, lure_persistence
+from app.grading import Response, TopicMeta, behavior_persona, grade_exam, lure_persistence, paced_time_limit
 from app.models import DiagnosticState, Question
 
 ATTEMPT = uuid4()
@@ -34,8 +34,7 @@ def question(topic_id=TOPIC_A, correct="A", qid=None):
     )
 
 
-def answer(q, option=None, confidence=1):
-    return Response(
+def answer(q, option=None, confidence=1):    return Response(
         question_id=q.id,
         selected_option_id=option or q.correct_option_id,
         confidence_level=confidence,
@@ -216,3 +215,84 @@ def test_syllabus_weight_scales_vulnerability():
     assert by_id[heavy].vulnerability_score == 0.9
     assert by_id[light].vulnerability_score == 0.1
     assert result.weak_topic_ids == (heavy, light)
+
+
+def test_paced_time_limit_scales_with_words():
+    short = paced_time_limit([10] * 6)
+    long = paced_time_limit([60] * 6)
+    assert short < long
+    assert short >= 120
+    assert paced_time_limit([10] * 6) == round(60 / 2.5 + 20 * 6)
+
+
+def test_behavior_persona_flags_fast_lures():
+    from app.grading import GradedItem
+
+    item = GradedItem(
+        question_id=uuid4(),
+        topic_id=TOPIC_A,
+        selected_option_id="B",
+        correct_option_id="A",
+        confidence_level=1,
+        is_correct=False,
+        diagnostic_state=DiagnosticState.LURE_ENTRAPMENT,
+        penalty_weight=1.0,
+        endorsed_misconception="client_authority",
+        time_spent_ms=3000,
+    )
+    assert behavior_persona([item], weak_topic_ids={TOPIC_A}, edges=[])["persona"] == "IMPULSIVE_MISCONCEPTION"
+
+
+def test_behavior_persona_flags_slow_gaps():
+    from app.grading import GradedItem
+
+    item = GradedItem(
+        question_id=uuid4(),
+        topic_id=TOPIC_A,
+        selected_option_id="B",
+        correct_option_id="A",
+        confidence_level=0,
+        is_correct=False,
+        diagnostic_state=DiagnosticState.RECOGNIZED_GAP,
+        penalty_weight=0.5,
+        endorsed_misconception=None,
+        time_spent_ms=60000,
+    )
+    assert behavior_persona([item], weak_topic_ids={TOPIC_A}, edges=[])["persona"] == "SCHEMA_DEFICIT"
+
+
+def test_behavior_persona_flags_prerequisite_cascade():
+    from app.grading import GradedItem
+
+    item = GradedItem(
+        question_id=uuid4(),
+        topic_id=TOPIC_B,
+        selected_option_id="B",
+        correct_option_id="A",
+        confidence_level=1,
+        is_correct=False,
+        diagnostic_state=DiagnosticState.LURE_ENTRAPMENT,
+        penalty_weight=1.0,
+        endorsed_misconception="x",
+        time_spent_ms=30000,
+    )
+    out = behavior_persona([item], weak_topic_ids={TOPIC_A, TOPIC_B}, edges=[(TOPIC_A, TOPIC_B)])
+    assert out["persona"] == "PREREQUISITE_BOTTLENECK"
+
+
+def test_behavior_persona_steady_when_clean():
+    from app.grading import GradedItem
+
+    item = GradedItem(
+        question_id=uuid4(),
+        topic_id=TOPIC_A,
+        selected_option_id="A",
+        correct_option_id="A",
+        confidence_level=1,
+        is_correct=True,
+        diagnostic_state=DiagnosticState.MASTERED,
+        penalty_weight=0.0,
+        endorsed_misconception=None,
+        time_spent_ms=12000,
+    )
+    assert behavior_persona([item], weak_topic_ids=set(), edges=[])["persona"] == "STEADY"

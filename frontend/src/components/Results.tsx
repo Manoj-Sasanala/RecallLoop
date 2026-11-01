@@ -42,6 +42,10 @@ export function Results({
 
   const counts = grade.summary.state_counts;
   const weak = grade.topic_breakdown.filter((topic) => topic.is_flagged_weak);
+  const behavior = grade.summary.behavior;
+  const totalVuln = weak.reduce((sum, t) => sum + t.vulnerability_score, 0);
+  const minutesFor = (vuln: number) =>
+    totalVuln > 0 ? Math.max(2, Math.round((vuln / totalVuln) * 15)) : 0;
 
   const optionsById = new Map(
     exam.questions.map((question) => [
@@ -140,8 +144,7 @@ export function Results({
         </div>
       </header>
 
-      <div className="stats">
-        <div className="stat">
+      <div className="stats">        <div className="stat">
           <div className="label">Raw accuracy</div>
           <div className="value">{pct(grade.summary.raw_accuracy)}</div>
           <div className="sub">correct answers</div>
@@ -162,6 +165,36 @@ export function Results({
           <div className="sub">misconceptions still active</div>
         </div>
       </div>
+
+      <section className="panel mt-16" aria-labelledby="readout-heading">
+        <div className="panel-head">
+          <h2 id="readout-heading">Behaviour readout</h2>
+          <span className="hint">deterministic — from timing, confidence, and the topic graph</span>
+        </div>
+        <div className="stack" style={{ gap: 6, fontSize: "0.88rem" }}>
+          <div>
+            <span className="mono small muted">EVIDENCE&nbsp;&nbsp;</span>
+            {counts.MASTERED ?? 0} mastered · {counts.FRAGILE_GUESS ?? 0} fragile ·{" "}
+            {counts.RECOGNIZED_GAP ?? 0} gaps · {counts.LURE_ENTRAPMENT ?? 0} lures
+          </div>
+          <div>
+            <span className="mono small muted">PATTERN&nbsp;&nbsp;&nbsp;</span>
+            <span className="badge warn">{behavior.persona.replaceAll("_", " ")}</span>{" "}
+            <span className="small">{behavior.detail}</span>
+          </div>
+          <div>
+            <span className="mono small muted">PLAN&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
+            {weak.length === 0 ? (
+              <span className="small">Nothing weak — retake to confirm stability.</span>
+            ) : (
+              <span className="small">
+                15-minute restudy:{" "}
+                {weak.map((t) => `${t.title} ${minutesFor(t.vulnerability_score)}m`).join(" · ")}
+              </span>
+            )}
+          </div>
+        </div>
+      </section>
 
       {/* Notion-Style Multi-View Database Switcher: Diagnosis Matrix vs Notion Kanban Board vs Obsidian Knowledge Graph */}
       <div className="row mt-16" style={{ justifyContent: "space-between", alignItems: "center" }}>

@@ -163,6 +163,12 @@ export function Remediation({
                 </div>
               </div>
 
+              {/* Cognitive prime: the exact failed question this card resolves */}
+              <div className="notion-prime-banner">
+                <span className="prime-label">Read to resolve</span>
+                <span className="prime-question">{card.missed_stem}</span>
+              </div>
+
               {/* Block 1: Callout Block - The Cognitive Trap */}
               {card.trapped_misconception && (
                 <div className="notion-callout-block warning">

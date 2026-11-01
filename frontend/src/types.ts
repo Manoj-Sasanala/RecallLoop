@@ -111,6 +111,7 @@ export type GradeResult = {
     mce_score: number;
     lure_persistence_rate: number;
     state_counts: Record<string, number>;
+    behavior: { persona: string; detail: string; counts: Record<string, number> };
   };
   topic_breakdown: TopicResult[];
   graded_items: GradedItem[];
@@ -120,6 +121,7 @@ export type RemediationCard = {
   topic_id: string;
   topic_title: string;
   trapped_misconception: string | null;
+  missed_stem: string;
   source_truth_quote: string;
   source_page: number;
   corrective_explanation_md: string;

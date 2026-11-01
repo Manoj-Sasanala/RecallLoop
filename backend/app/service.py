@@ -12,7 +12,7 @@ from sqlmodel import Session, select
 
 from app.bundles import BUNDLES, BundleQuestion, seed_session
 from app.grading import Response as GradedResponse
-from app.grading import TopicMeta, grade_exam
+from app.grading import TopicMeta, behavior_persona, grade_exam, paced_time_limit
 from app.ingestion import ExtractedDocument, ExtractedPage, extract_pdf
 from app.llm import LLMClient
 from app.models import (
@@ -193,6 +193,9 @@ def generate_for_session(
             pool = [q for q in pool if q.topic_code in wanted] or pool
         document = db.exec(select(SourceDocument).where(SourceDocument.session_id == session.id)).first()
         rows = _question_rows(db, attempt, session, pool[:question_count], document.id, topics)
+        attempt.time_limit_sec = paced_time_limit([_pool_words(q) for q in pool[:question_count]])
+        db.add(attempt)
+        db.commit()
         session.status = "EXAM_READY"
         db.add(session)
         db.commit()
@@ -233,6 +236,9 @@ def generate_for_session(
     db.commit()
     for row in rows:
         db.refresh(row)
+    attempt.time_limit_sec = paced_time_limit([_question_words(q) for q in rows])
+    db.add(attempt)
+    db.commit()
     session.status = "EXAM_READY"
     db.add(session)
     db.commit()
@@ -316,6 +322,15 @@ def grade_submission(
     db.add(attempt)
     db.commit()
 
+    edge_rows = list(
+        db.exec(select(TopicEdge).where(TopicEdge.session_id == attempt.session_id))
+    )
+    behavior = behavior_persona(
+        result.items,
+        result.weak_topic_ids,
+        [(e.prerequisite_topic_id, e.dependent_topic_id) for e in edge_rows],
+    )
+
     by_id = {q.id: q for q in questions}
     graded_items = []
     for item in result.items:
@@ -345,6 +360,7 @@ def grade_submission(
             "mce_score": result.mce_score,
             "lure_persistence_rate": result.lure_persistence_rate,
             "state_counts": result.state_counts,
+            "behavior": behavior,
         },
         "topic_breakdown": [
             {
@@ -535,6 +551,20 @@ def revision_plan(db: Session, session: StudySession) -> dict:
     return {"session_id": str(session.id), "items": items}
 
 
+def _question_words(question: Question) -> int:
+    words = len(question.question_stem.split())
+    for opt in question.options_json or []:
+        words += len(str(opt.get("text", "")).split())
+    return words
+
+
+def _pool_words(spec) -> int:
+    words = len(spec.stem.split())
+    for opt in spec.options:
+        words += len(str(opt.get("text", "")).split())
+    return words
+
+
 def remediation_cards(db: Session, attempt: ExamAttempt, topic_ids: list[UUID]) -> list[dict]:
     session = db.get(StudySession, attempt.session_id)
     bundle = BUNDLES.get(session.demo_bundle_id) if session and session.demo_bundle_id else None
@@ -578,6 +608,7 @@ def remediation_cards(db: Session, attempt: ExamAttempt, topic_ids: list[UUID]) 
                 "topic_id": str(topic.id),
                 "topic_title": topic.title,
                 "trapped_misconception": item_attempt.endorsed_misconception,
+                "missed_stem": question.question_stem,
                 "source_truth_quote": question.verbatim_source_quote,
                 "source_page": question.source_page_number,
                 "corrective_explanation_md": (

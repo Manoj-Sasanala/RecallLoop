@@ -82,6 +82,7 @@ def test_demo_bundle_full_loop(api):
     assert submitted.status_code == 200, submitted.text
     graded = submitted.json()
     assert graded["summary"]["state_counts"]["LURE_ENTRAPMENT"] >= 1
+    assert graded["summary"]["behavior"]["persona"] == "IMPULSIVE_MISCONCEPTION"
     weak = [t for t in graded["topic_breakdown"] if t["is_flagged_weak"]]
     assert weak and weak[0]["title"] == "Leader election"
     assert graded["graded_items"][0]["verbatim_source_quote"]
@@ -95,6 +96,7 @@ def test_demo_bundle_full_loop(api):
     assert plan["remediation_cards"], plan
     assert plan["remediation_cards"][0]["source_truth_quote"]
     assert plan["remediation_cards"][0]["trapped_misconception"]
+    assert plan["remediation_cards"][0]["missed_stem"]
     assert "page_image_b64" in plan["remediation_cards"][0]
     retest_id = plan["retest_exam_attempt_id"]
     assert len(plan["retest_questions"]) == 2
